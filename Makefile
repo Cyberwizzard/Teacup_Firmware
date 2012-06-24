@@ -37,7 +37,7 @@ MCU_TARGET = atmega644p
 # MCU_TARGET = at90usb1287
 
 # CPU clock rate
-F_CPU = 16000000L
+F_CPU = 20000000L
 # F_CPU = 8000000L
 DEFS = -DF_CPU=$(F_CPU)
 
@@ -59,18 +59,19 @@ AVRDUDECONF = /etc/avrdude.conf
 #                                                                            #
 ##############################################################################
 
-PROGPORT = /dev/arduino
-# PROGPORT = /dev/ttyUSB0
+#PROGPORT = /dev/arduino
+PROGPORT = /dev/ttyUSB0
 
 # atmega168
 #PROGBAUD = 19200
 # atmega328p, 644p, 1280
-PROGBAUD = 57600
+#PROGBAUD = 57600
 # atmega 2560
-# PROGBAUD = 115200
+PROGBAUD = 115200
 
 # at least mega2560 needs stk500v2
-PROGID = arduino
+#PROGID = arduino
+PROGID = stk500v2
 
 ##############################################################################
 #                                                                            #
@@ -160,7 +161,7 @@ functionsbysize: $(OBJ)
 
 %.o: %.c config.h Makefile
 	@echo "  CC        $@"
-	@$(CC) -c $(CFLAGS) -Wa,-adhlns=$(<:.c=.al) -o $@ $(subst .o,.c,$@)
+	$(CC) -c $(CFLAGS) -Wa,-adhlns=$(<:.c=.al) -o $@ $(subst .o,.c,$@)
 
 %.elf: $(OBJ)
 	@echo "  LINK      $@"
