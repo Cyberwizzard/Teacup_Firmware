@@ -74,7 +74,9 @@ struct {
 /// default scaled I factor, equivalent to 0.5
 #define		DEFAULT_I				512
 /// default scaled D factor, equivalent to 24
-#define		DEFAULT_D				24576
+//#define		DEFAULT_D				24576
+// Edit Berend: modify to 30 for more aggressive heating/cooling
+#define		DEFAULT_D				30720
 /// default scaled I limit
 #define		DEFAULT_I_LIMIT	384
 
@@ -333,6 +335,12 @@ void heater_tick(heater_t h, temp_type_t type, uint16_t current_temp, uint16_t t
 void heater_set(heater_t index, uint8_t value) {
 	if (index >= NUM_HEATERS)
 		return;
+
+        // Hack by Berend: invert the PWM for the bed
+        //if (heaters[index].heater_pin == TEMP_SENSOR_BED)
+        if(index == HEATER_bed) {
+                value = 255 - value;
+        }	        
 
 	heaters_runtime[index].heater_output = value;
 
