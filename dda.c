@@ -435,10 +435,29 @@ void dda_create(DDA *dda, TARGET *target) {
 				dda->c_min = c_limit;
 // This section is plain wrong, like in it's only half of what we need. This factor 960000 is dependant on STEPS_PER_MM.
 			// overflows at target->F > 65535; factor 16. found by try-and-error; will overshoot target speed a bit
-			dda->rampup_steps = target->F * target->F / (uint32_t)(STEPS_PER_M_X * ACCELERATION / 960000.);
+			//dda->rampup_steps = target->F * target->F / (uint32_t)(STEPS_PER_M_X * ACCELERATION / 960000.);
 //sersendf_P(PSTR("rampup calc %lu\n"), dda->rampup_steps);
-			dda->rampup_steps = 100000; // replace mis-calculation by a safe value
+			//dda->rampup_steps = 100000; // replace mis-calculation by a safe value
 // End of wrong section.
+
+			/**
+			 * Assuming: F is in mm/min, STEPS_PER_M_X is in steps/m, ACCELERATION is in mm/s²
+			 * Given:
+			 * - Velocity v at time t given acceleration a: v(t) = a*t
+			 * - Displacement s at time t given acceleration a: s(t) = 1/2 * a * t²
+			 * - Displacement until reaching target velocity v: s = 1/2 * (v² / a)
+			 * - Final result: steps needed to reach velocity v given acceleration a:
+			 * steps = (STEPS_PER_M_X * F^2) / (7200000 * ACCELERATION)
+			 * To keep precision, break up in floating point and integer part: F^2 * (int)(STEPS_PER_M_X / (7200000 * ACCELERATION))
+			 * Note: the floating point part is static so its calculated during compilation.
+			 * Note 2: the floating point part will be smaller than one, invert it:
+			 * steps = F^2 / (int)((7200000 * ACCELERATION) / STEPS_PER_M_X)
+			 * Note 3: As mentioned, setting F to 65535 or larger will overflow the calculation. Make sure this does not happen.
+			 * Note 4: General remark, anyone trying to run their machine at 65535 mm/min > 1m/s is nuts
+			 */
+			if(target->F > 65534) target->F = 65534;
+			dda->rampup_steps = (target->F * target->F) / (uint32_t)((7200000.0f * ACCELERATION) / (float)STEPS_PER_M_X);
+
 			if (dda->rampup_steps > dda->total_steps / 2)
 				dda->rampup_steps = dda->total_steps / 2;
 			dda->rampdown_steps = dda->total_steps - dda->rampup_steps;
@@ -835,7 +854,7 @@ void dda_step(DDA *dda) {
 		}
 		if (recalc_speed) {
 			move_state.n += 4;
-			// be careful of signedness!
+			// be careful of signedness! note: equation 13:
 			move_state.c = (int32_t)move_state.c - ((int32_t)(move_state.c * 2) / (int32_t)move_state.n);
 		}
 		move_state.step_no++;
