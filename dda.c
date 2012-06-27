@@ -175,6 +175,63 @@ const uint8_t	msbloc (uint32_t v) {
 }
 
 /**
+ * This routine determines if the angle between 2 vectors is small enough to attempt a running transition between moves.
+ * Since we do not actually care for the angle but rather know if its sufficiently small, we only check if the cos⁻¹ value is in range.
+ */
+int dda_small_angle(int32_t x1, int32_t y1, int32_t z1, int32_t x2, int32_t y2, int32_t z2) {
+//	sersendf_P(PSTR("Calculating angle between: ("));
+//	sersendf_P(PSTR("%ld,"), x1);
+//	sersendf_P(PSTR("%ld,"), y1);
+//	sersendf_P(PSTR("%ld) and ("), z1);
+//	sersendf_P(PSTR("%ld,"), x2);
+//	sersendf_P(PSTR("%ld,"), y2);
+//	sersendf_P(PSTR("%ld)\r\n"), z2);
+
+	// Safety: if either vector is zero, there is no angle between them
+	if(x1==0 && y1 == 0 && z1 ==0) return 0;
+	if(x2==0 && y2 == 0 && z2 ==0) return 0;
+	// Tweak: if the move is repeated the angle is zero
+	if(x1==x2 && y1==y2 && z1==z2) return 1;
+
+	// Scale the inputs: large vectors can overflow the calculations but can be scaled down
+	// (as the angle between vectors is unrelated to their size) to prevent this at the cost of accuracy.
+	// Note: signed integers will overflow if you multiply 32k*32k or larger - aim for > 1000
+	// TODO: Are these ranges big enough? Observed range: 10 - 2,000,000
+	if(x1 > 1000000 || y1 > 1000000 || z1 > 1000000) { x1 /= 1000; y1 /= 1000; z1 /= 1000; }
+	else if(x1 > 100000 || y1 > 100000 || z1 > 100000) { x1 /= 100; y1 /= 100; z1 /= 100; }
+	else if(x1 > 10000 || y1 > 10000 || z1 > 10000) { x1 /= 10; y1 /= 10; z1 /= 10;	}
+	else if(x1 < -1000000 || y1 < -1000000 || z1 < -1000000) { x1 /= 1000; y1 /= 1000; z1 /= 1000; }
+	else if(x1 < -100000 || y1 < -100000 || z1 < -100000) { x1 /= 100; y1 /= 100; z1 /= 100; }
+	else if(x1 < -10000 || y1 < -10000 || z1 < -10000) { x1 /= 10; y1 /= 10; z1 /= 10;	}
+	if(x2 > 1000000 || y2 > 1000000 || z2 > 1000000) { x2 /= 1000; y2 /= 1000; z2 /= 1000; }
+	else if(x2 > 100000 || y2 > 100000 || z2 > 100000) { x2 /= 100; y2 /= 100; z2 /= 100; }
+	else if(x2 > 10000 || y2 > 10000 || z2 > 10000) { x2 /= 10; y2 /= 10; z2 /= 10;	}
+	else if(x2 < -1000000 || y2 < -1000000 || z2 < -1000000) { x2 /= 1000; y2 /= 1000; z2 /= 1000; }
+	else if(x2 < -100000 || y2 < -100000 || z2 < -100000) { x2 /= 100; y2 /= 100; z2 /= 100; }
+	else if(x2 < -10000 || y2 < -10000 || z2 < -10000) { x2 /= 10; y2 /= 10; z2 /= 10;	}
+
+//	sersendf_P(PSTR("Scaled vectors: ("));
+//	sersendf_P(PSTR("%ld,"), x1);
+//	sersendf_P(PSTR("%ld,"), y1);
+//	sersendf_P(PSTR("%ld) and ("), z1);
+//	sersendf_P(PSTR("%ld,"), x2);
+//	sersendf_P(PSTR("%ld,"), y2);
+//	sersendf_P(PSTR("%ld)\r\n"), z2);
+
+	// No other way around it: calculate the actual angle
+	int32_t dot = x1*x2 + y1*y2 + z1*z2;
+//	sersendf_P(PSTR("dot product: %ld ;"), dot);
+	int32_t l1 = int_sqrt(x1*x1+y1*y1+z1*z1);
+//	sersendf_P(PSTR("|v1|: %ld ;"), l1);
+	int32_t l2 = int_sqrt(x2*x2+y2*y2+z2*z2);
+//	sersendf_P(PSTR("|v2|: %ld - |v1|*|v2|: %ld\r\n"), l2, l1 * l2);
+	float cos = (float)dot / (float)(l1 * l2);
+	// Angles smaller than 30 degrees means the input is larger than 0.86
+	if(cos > 0.86) return 1;
+	return 0;
+}
+
+/**
  * Safety procedure: if something goes wrong, for example an opto is triggered during normal movement,
  * we shut down the entire machine.
  * @param msg The reason why the machine did an emergency stop
@@ -227,9 +284,11 @@ void dda_new_startpoint(void) {
 
 	This algorithm is probably the main limiting factor to print speed in terms of firmware limitations
 */
-void dda_create(DDA *dda, TARGET *target) {
+void dda_create(DDA *dda, TARGET *target, DDA *prev_dda) {
 	uint32_t	steps, x_delta_um, y_delta_um, z_delta_um, e_delta_um;
 	uint32_t	distance, c_limit, c_limit_calc;
+	static int32_t x_delta_old = 0,y_delta_old = 0,z_delta_old = 0;
+	int32_t x_delta,y_delta,z_delta, small_angle = 0;
 
 	// initialise DDA to a known state
 	dda->allflags = 0;
@@ -247,6 +306,15 @@ void dda_create(DDA *dda, TARGET *target) {
 	y_delta_um = (uint32_t)labs(target->Y - startpoint.Y);
 	z_delta_um = (uint32_t)labs(target->Z - startpoint.Z);
 
+	// Look ahead vectorization: determine the vectors for this move
+	x_delta = target->X - startpoint.X;
+	y_delta = target->Y - startpoint.Y;
+	z_delta = target->Z - startpoint.Z;
+
+	sersendf_P(PSTR("Last move: x = %ld - "), startpoint_steps.X);
+	sersendf_P(PSTR("y = %ld - "), startpoint_steps.Y);
+	sersendf_P(PSTR("z = %ld\r\n"), startpoint_steps.Z);
+
 	um_to_steps_x(steps, target->X);
 	dda->x_delta = labs(steps - startpoint_steps.X);
 	startpoint_steps.X = steps;
@@ -256,6 +324,24 @@ void dda_create(DDA *dda, TARGET *target) {
 	um_to_steps_z(steps, target->Z);
 	dda->z_delta = labs(steps - startpoint_steps.Z);
 	startpoint_steps.Z = steps;
+
+	sersendf_P(PSTR("New move: x = %ld - "), startpoint_steps.X);
+	sersendf_P(PSTR("y = %ld - "), startpoint_steps.Y);
+	sersendf_P(PSTR("z = %ld\r\n"), startpoint_steps.Z);
+
+	// TODO: Make sure the feed rates match or implement a function to match the speeds on the fly
+	// No need checking if the angles between moves are small if its already executing
+	if(prev_dda != NULL && prev_dda->live == 0) {
+		if((small_angle = dda_small_angle(x_delta_old, y_delta_old, z_delta_old, x_delta, y_delta, z_delta))) {
+			sersendf_P(PSTR("Small angle!\r\n"));
+		} else {
+			sersendf_P(PSTR("NOT a small angle!\r\n"));
+		}
+	}
+	x_delta_old = x_delta;
+	y_delta_old = y_delta;
+	z_delta_old = z_delta;
+
 
 	dda->x_direction = (target->X >= startpoint.X)?1:0;
 	dda->y_direction = (target->Y >= startpoint.Y)?1:0;
@@ -461,6 +547,20 @@ void dda_create(DDA *dda, TARGET *target) {
 			if (dda->rampup_steps > dda->total_steps / 2)
 				dda->rampup_steps = dda->total_steps / 2;
 			dda->rampdown_steps = dda->total_steps - dda->rampup_steps;
+
+			// Look-ahead: if the angle is small and the feedrates match, disable ramping between moves
+			if(prev_dda->live == 0 && small_angle == 1) {
+				sersendf_P(PSTR("Applied look-ahead to move\r\n"));
+				// Set the ramp down at the end of the move: no ramp down
+				prev_dda->rampdown_steps = prev_dda->total_steps;
+				// Set ramp up for the next move to none
+				dda->rampup_steps = 0;
+				// Adjust the timeout to match the maximum speed
+				dda->c = dda->c_min;
+				// No need to recalculate n and c in move_state: they are retained
+				// between moves.
+			}
+
 		#elif defined ACCELERATION_TEMPORAL
 			// TODO: limit speed of individual axes to MAXIMUM_FEEDRATE
 			// TODO: calculate acceleration/deceleration for each axis
@@ -846,16 +946,19 @@ void dda_step(DDA *dda) {
 			if (move_state.n < 0) // wrong ramp direction
 				move_state.n = -((int32_t)2) - move_state.n;
 			recalc_speed = 1;
+			//serial_writestr((uint8_t*)"Up:  ");
 		}
 		else if (move_state.step_no >= dda->rampdown_steps) {
 			if (move_state.n > 0) // wrong ramp direction
 				move_state.n = -((int32_t)2) - move_state.n;
 			recalc_speed = 1;
+			//serial_writestr((uint8_t*)"Down:");
 		}
 		if (recalc_speed) {
 			move_state.n += 4;
 			// be careful of signedness! note: equation 13:
 			move_state.c = (int32_t)move_state.c - ((int32_t)(move_state.c * 2) / (int32_t)move_state.n);
+			//sersendf_P(PSTR("n:%ld ; c:%ld\r\n"), move_state.n, move_state.c);
 		}
 		move_state.step_no++;
 // Print the number of steps actually needed for ramping up

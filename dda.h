@@ -251,7 +251,7 @@ void dda_init(void);
 void dda_new_startpoint(void);
 
 // create a DDA
-void dda_create(DDA *dda, TARGET *target);
+void dda_create(DDA *dda, TARGET *target, DDA *prev_dda);
 
 // start a created DDA (called from timer interrupt)
 void dda_start(DDA *dda)																						__attribute__ ((hot));
