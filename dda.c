@@ -232,6 +232,18 @@ int dda_small_angle(int32_t x1, int32_t y1, int32_t z1, int32_t x2, int32_t y2, 
 }
 
 /**
+ * Determine the distance between both vectors. This constitutes the force of changing directions
+ * at speed. The result of this can be scaled down to obtain acceptable speeds for changing direction.
+ */
+int dda_jerk_size(int32_t x1, int32_t y1, int32_t z1, int32_t x2, int32_t y2, int32_t z2) {
+	// TODO: Handle overflows: 32k * 32k and larger will overflow
+	int32_t xs = x1*x2;
+	int32_t ys = y1*y2;
+	int32_t zs = z1*z2;
+	return int_sqrt(xs+ys+zs);
+}
+
+/**
  * Safety procedure: if something goes wrong, for example an opto is triggered during normal movement,
  * we shut down the entire machine.
  * @param msg The reason why the machine did an emergency stop
@@ -287,8 +299,14 @@ void dda_new_startpoint(void) {
 void dda_create(DDA *dda, TARGET *target, DDA *prev_dda) {
 	uint32_t	steps, x_delta_um, y_delta_um, z_delta_um, e_delta_um;
 	uint32_t	distance, c_limit, c_limit_calc;
-	static int32_t x_delta_old = 0,y_delta_old = 0,z_delta_old = 0;
-	int32_t x_delta,y_delta,z_delta, small_angle = 0;
+	#ifdef LOOKAHEAD
+		// All values in um
+		static int32_t x_delta_old = 0,y_delta_old = 0,z_delta_old = 0;
+		int32_t x_delta,y_delta,z_delta, small_angle = 0;
+		// In mm/min - used to track changes in speeds between moves
+		static uint32_t prev_F = 0;
+		static uint32_t moveno = 1;
+	#endif
 
 	// initialise DDA to a known state
 	dda->allflags = 0;
@@ -311,7 +329,7 @@ void dda_create(DDA *dda, TARGET *target, DDA *prev_dda) {
 	y_delta = target->Y - startpoint.Y;
 	z_delta = target->Z - startpoint.Z;
 
-	sersendf_P(PSTR("Last move: x = %ld - "), startpoint_steps.X);
+	sersendf_P(PSTR("Previous move (%lu) : x = %ld - "), moveno-1, startpoint_steps.X);
 	sersendf_P(PSTR("y = %ld - "), startpoint_steps.Y);
 	sersendf_P(PSTR("z = %ld\r\n"), startpoint_steps.Z);
 
@@ -325,7 +343,7 @@ void dda_create(DDA *dda, TARGET *target, DDA *prev_dda) {
 	dda->z_delta = labs(steps - startpoint_steps.Z);
 	startpoint_steps.Z = steps;
 
-	sersendf_P(PSTR("New move: x = %ld - "), startpoint_steps.X);
+	sersendf_P(PSTR("New move (%lu): x = %ld - "), moveno, startpoint_steps.X);
 	sersendf_P(PSTR("y = %ld - "), startpoint_steps.Y);
 	sersendf_P(PSTR("z = %ld\r\n"), startpoint_steps.Z);
 
@@ -338,10 +356,6 @@ void dda_create(DDA *dda, TARGET *target, DDA *prev_dda) {
 			sersendf_P(PSTR("NOT a small angle!\r\n"));
 		}
 	}
-	x_delta_old = x_delta;
-	y_delta_old = y_delta;
-	z_delta_old = z_delta;
-
 
 	dda->x_direction = (target->X >= startpoint.X)?1:0;
 	dda->y_direction = (target->Y >= startpoint.Y)?1:0;
@@ -542,25 +556,53 @@ void dda_create(DDA *dda, TARGET *target, DDA *prev_dda) {
 			 * Note 4: General remark, anyone trying to run their machine at 65535 mm/min > 1m/s is nuts
 			 */
 			if(target->F > 65534) target->F = 65534;
-			dda->rampup_steps = (target->F * target->F) / (uint32_t)((7200000.0f * ACCELERATION) / (float)STEPS_PER_M_X);
-
+			uint32_t ramp_steps = (target->F * target->F) / (uint32_t)((7200000.0f * ACCELERATION) / (float)STEPS_PER_M_X);
+			dda->rampup_steps = ramp_steps;
 			if (dda->rampup_steps > dda->total_steps / 2)
 				dda->rampup_steps = dda->total_steps / 2;
-			dda->rampdown_steps = dda->total_steps - dda->rampup_steps;
+			dda->rampdown_steps = dda->total_steps - ramp_steps;	// Note: look-ahead might have set rampup to zero
 
-			// Look-ahead: if the angle is small and the feedrates match, disable ramping between moves
+			#ifdef LOOKAHEAD
+			if(prev_dda->live == 0) sersendf_P(PSTR("Lookahead: old F: %ld - this F: %ld - small angle: %d\r\n"), prev_F, target->F, small_angle);
+
+			// Look-ahead: if the angle is small try to adjust the ramps to match speeds
 			if(prev_dda->live == 0 && small_angle == 1) {
+				if(target->F > prev_F) {
+					// We want to move faster: disable the ramp down
+
+					// Shorten the ramp up
+				} else if(target->F < prev_F) {
+//					// This move is slower: disable rampup for this move
+//					dda->rampup_steps = 0;
+//					// Without a rampup, we start at full speed
+//					sersendf_P(PSTR("DDA C: %ld - DDA c_min: %ld\n"), dda->c, dda->c_min);
+//					//dda->c = dda->c_min;
+//					// Shorten the rampdown of the previous move
+//					// Get the length of the ramp down of the previous move
+//					uint32_t prev_rampdown_steps = prev_dda->total_steps - prev_dda->rampdown_steps;
+//					// Acceleration is linear so the ratio between feed rates scales the ramp length
+//					prev_dda->rampdown_steps = (prev_rampdown_steps * target->F) / prev_F;
+//					sersendf_P(PSTR("Slower move: rampdown: %ld -> %ld\r\n"), prev_rampdown_steps, prev_dda->rampdown_steps);
+				} else {
+					// Speeds remain the same
+					// Set the ramp down at the end of the move: no ramp down
+					prev_dda->rampdown_steps = prev_dda->total_steps;
+					// Set ramp up for the next move to none
+					dda->rampup_steps = 0;
+					// Adjust the timeout to match the maximum speed
+					sersendf_P(PSTR("Match: (%lu) len=%lu, up=%lu, down=0 ; (%lu) len=%lu, up=0, down=%lu\r\n"), \
+							moveno-1, prev_dda->total_steps, prev_dda->rampup_steps, \
+							moveno, dda->total_steps, dda->total_steps - dda->rampdown_steps);
+					//dda->c = dda->c_min;
+					// No need to recalculate n and c in move_state: they are retained
+					// between moves.
+				}
 				sersendf_P(PSTR("Applied look-ahead to move\r\n"));
-				// Set the ramp down at the end of the move: no ramp down
-				prev_dda->rampdown_steps = prev_dda->total_steps;
-				// Set ramp up for the next move to none
-				dda->rampup_steps = 0;
-				// Adjust the timeout to match the maximum speed
-				dda->c = dda->c_min;
-				// No need to recalculate n and c in move_state: they are retained
-				// between moves.
+				if(dda->live != 0)
+					sersendf_P(PSTR("Error: look ahead not fast enough\r\n"));
 			}
 
+			#endif
 		#elif defined ACCELERATION_TEMPORAL
 			// TODO: limit speed of individual axes to MAXIMUM_FEEDRATE
 			// TODO: calculate acceleration/deceleration for each axis
@@ -600,6 +642,17 @@ void dda_create(DDA *dda, TARGET *target, DDA *prev_dda) {
 
 	if (DEBUG_DDA && (debug_flags & DEBUG_DDA))
 		serial_writestr_P(PSTR("] }\n"));
+
+#ifdef LOOKAHEAD
+	// Update the deltas for when we add the next move
+	x_delta_old = x_delta;
+	y_delta_old = y_delta;
+	z_delta_old = z_delta;
+	// Save the speed of this move
+	prev_F = target->F;
+#endif
+
+	moveno++;
 
 	// next dda starts where we finish
 	memcpy(&startpoint, target, sizeof(TARGET));
@@ -958,7 +1011,7 @@ void dda_step(DDA *dda) {
 			move_state.n += 4;
 			// be careful of signedness! note: equation 13:
 			move_state.c = (int32_t)move_state.c - ((int32_t)(move_state.c * 2) / (int32_t)move_state.n);
-			//sersendf_P(PSTR("n:%ld ; c:%ld\r\n"), move_state.n, move_state.c);
+			//sersendf_P(PSTR("n:%ld ; c:%ld ; steps: %ld / %lu\r\n"), move_state.n, move_state.c, move_state.step_no, move_state.y_steps);
 		}
 		move_state.step_no++;
 // Print the number of steps actually needed for ramping up
@@ -1033,6 +1086,7 @@ void dda_step(DDA *dda) {
 		#endif
 		// z stepper is only enabled while moving
 		z_disable();
+		sersendf_P(PSTR("Move end\r\n"));
 	}
 	else
 		steptimeout = 0;
