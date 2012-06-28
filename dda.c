@@ -32,6 +32,9 @@
 /// step timeout
 volatile uint8_t	steptimeout = 0;
 
+// Note: the floating point bit is optimized away during compilation
+#define ACCELERATE_RAMP_LEN(speed) ((speed*speed) / (uint32_t)((7200000.0f * ACCELERATION) / (float)STEPS_PER_M_X))
+
 /*
 	position tracking
 */
@@ -303,8 +306,6 @@ void dda_create(DDA *dda, TARGET *target, DDA *prev_dda) {
 		// All values in um
 		static int32_t x_delta_old = 0,y_delta_old = 0,z_delta_old = 0;
 		int32_t x_delta,y_delta,z_delta, small_angle = 0;
-		// In mm/min - used to track changes in speeds between moves
-		static uint32_t prev_F = 0;
 		static uint32_t moveno = 1;
 	#endif
 
@@ -316,6 +317,13 @@ void dda_create(DDA *dda, TARGET *target, DDA *prev_dda) {
 
 	// we end at the passed target
 	memcpy(&(dda->endpoint), target, sizeof(TARGET));
+
+	#ifdef LOOKAHEAD
+	// Set the start and stop speeds to zero for this move (will be updated later by look-ahead)
+	// Note: original behavior - full stops between moves
+	dda->F_start = 0;
+	dda->F_end = 0;
+	#endif
 
 // TODO TODO: We should really make up a loop for all axes.
 //            Think of what happens when a sixth axis (multi colour extruder)
@@ -533,12 +541,12 @@ void dda_create(DDA *dda, TARGET *target, DDA *prev_dda) {
 			dda->c_min = (move_duration / target->F) << 8;
 			if (dda->c_min < c_limit)
 				dda->c_min = c_limit;
-// This section is plain wrong, like in it's only half of what we need. This factor 960000 is dependant on STEPS_PER_MM.
+			// This section is plain wrong, like in it's only half of what we need. This factor 960000 is dependant on STEPS_PER_MM.
 			// overflows at target->F > 65535; factor 16. found by try-and-error; will overshoot target speed a bit
 			//dda->rampup_steps = target->F * target->F / (uint32_t)(STEPS_PER_M_X * ACCELERATION / 960000.);
-//sersendf_P(PSTR("rampup calc %lu\n"), dda->rampup_steps);
+			//sersendf_P(PSTR("rampup calc %lu\n"), dda->rampup_steps);
 			//dda->rampup_steps = 100000; // replace mis-calculation by a safe value
-// End of wrong section.
+			// End of wrong section.
 
 			/**
 			 * Assuming: F is in mm/min, STEPS_PER_M_X is in steps/m, ACCELERATION is in mm/s²
@@ -554,24 +562,62 @@ void dda_create(DDA *dda, TARGET *target, DDA *prev_dda) {
 			 * steps = F^2 / (int)((7200000 * ACCELERATION) / STEPS_PER_M_X)
 			 * Note 3: As mentioned, setting F to 65535 or larger will overflow the calculation. Make sure this does not happen.
 			 * Note 4: General remark, anyone trying to run their machine at 65535 mm/min > 1m/s is nuts
+			 *
+			 * ((speed*speed) / (uint32_t)((7200000.0f * ACCELERATION) / (float)STEPS_PER_M_X))
 			 */
 			if(target->F > 65534) target->F = 65534;
-			uint32_t ramp_steps = (target->F * target->F) / (uint32_t)((7200000.0f * ACCELERATION) / (float)STEPS_PER_M_X);
+			uint32_t ramp_steps = ACCELERATE_RAMP_LEN(target->F);
 			dda->rampup_steps = ramp_steps;
 			if (dda->rampup_steps > dda->total_steps / 2)
 				dda->rampup_steps = dda->total_steps / 2;
 			dda->rampdown_steps = dda->total_steps - ramp_steps;	// Note: look-ahead might have set rampup to zero
 
 			#ifdef LOOKAHEAD
-			if(prev_dda->live == 0) sersendf_P(PSTR("Lookahead: old F: %ld - this F: %ld - small angle: %d\r\n"), prev_F, target->F, small_angle);
+			if(prev_dda->live == 0) sersendf_P(PSTR("Lookahead: old F: %ld - this F: %ld - small angle: %d\r\n"), prev_dda->endpoint.F, target->F, small_angle);
 
 			// Look-ahead: if the angle is small try to adjust the ramps to match speeds
 			if(prev_dda->live == 0 && small_angle == 1) {
-				if(target->F > prev_F) {
+				// Update the previous move: set the exit speed
+				// TODO: Scale the exit speed based on jerk and feed rates
+				// For now: use the lowest rate between the 2 as a crossing
+				// Note: this is a given: the start speed and end speed can NEVER be
+				// higher than the target speed in a move!
+				// Note 2: this provides an upper limit, if needed, the speed is lowered.
+				uint32_t crossF = prev_dda->endpoint.F;
+				if(crossF > target.F) crossF = target.F;
+
+				// Forward check: test if we can actually reach the target speed in the previous move
+				// If not: we need to determine the obtainable speed and adjust crossF accordingly.
+				uint32_t up = ACCELERATE_RAMP_LEN(prev_dda->endpoint.F - prev_dda->F_start);
+				uint32_t down = ACCELERATE_RAMP_LEN(prev_dda->endpoint.F - crossF);
+				// Clip the ramps to the length of the move or the scaling will fail
+				if(up > prev_dda->total_steps) up = prev_dda->total_steps;
+				if(down > prev_dda->total_steps) down = prev_dda->total_steps;
+				if(up+down > prev_dda->total_steps) {
+					// It takes too long: scale the ramps in proportion to fit them in one move
+					// TODO: Convert this to integer and/or fixed point
+					float ratio = (float)prev_dda->total_steps / (float)(up+down);
+					up = (uint32_t)((float)up * ratio);		// Assuming the conversion truncates the result, this is
+					down = (uint32_t)((float)up * ratio);	// the lower bound of both. As such: up+down <= total_steps
+					// TODO: Make sure up+down <= total_steps
+
+					// Scale the cross speed to match the ratio
+					crossF = (uint32_t)((float)crossF * ratio);
+				}
+
+				// Forward check 2: test if we can actually reach the target speed in this move.
+				// If not: determine obtainable speed and adjust crossF accordingly. If that
+				// happens, a third (reverse) pass is needed to lower the speeds in the previous move...
+
+
+
+
+
+				if(target->F > prev_dda->endpoint.F) {
 					// We want to move faster: disable the ramp down
 
 					// Shorten the ramp up
-				} else if(target->F < prev_F) {
+				} else if(target->F < prev_dda->endpoint.F) {
 //					// This move is slower: disable rampup for this move
 //					dda->rampup_steps = 0;
 //					// Without a rampup, we start at full speed
@@ -648,8 +694,6 @@ void dda_create(DDA *dda, TARGET *target, DDA *prev_dda) {
 	x_delta_old = x_delta;
 	y_delta_old = y_delta;
 	z_delta_old = z_delta;
-	// Save the speed of this move
-	prev_F = target->F;
 #endif
 
 	moveno++;
