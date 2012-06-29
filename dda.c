@@ -618,13 +618,16 @@ void dda_create(DDA *dda, TARGET *target, DDA *prev_dda) {
 					if(up-down > prev_dda->total_steps) {
 						// Cannot reach crossF, lower it and adjust ramps
 						down = 0;
+						// Before we can determine how fast we can go in this move, we need the number of
+						// steps needed to reach the entry speed.
+						uint32_t prestep = ACCELERATE_RAMP_LEN(prev_dda->F_start);
 						// Calculate what feed rate we can reach during this move
-						crossF = dda_steps_to_velocity(prev_dda->total_steps);
+						crossF = dda_steps_to_velocity(prestep+prev_dda->total_steps);
 						// The problem with the 'dda_steps_to_velocity' is that it will produce a
 						// rounded result. Use it to obtain an exact amount of steps needed to reach
 						// that speed and set that as the ramp up; we might stop accelerating for a
 						// couple of steps but that is better than introducing errors in the moves.
-						up = ACCELERATE_RAMP_LEN(crossF);
+						up = ACCELERATE_RAMP_LEN(crossF) - prestep;
 
 						// TODO: Remove this sanity check
 						if(up > prev_dda->total_steps) {
@@ -698,14 +701,37 @@ void dda_create(DDA *dda, TARGET *target, DDA *prev_dda) {
 				dda->F_start = crossF;
 				sersendf_P(PSTR("Actual crossing speed: %lu\r\n"), crossF);
 
+				// Potential reverse processing:
 				// Make sure the crossing speed is the same, if its not, we need to slow the previous move to
-				// the current crossing speed (note: as hinted, the speed can only go down).
+				// the current crossing speed (note: the crossing speed could only be lowered).
+				// This can happen when this move is a short move and the previous move was a larger or faster move:
+				// since we need to be able to stop if this is the last move, we lowered the crossing speed
+				// between this move and the previous move...
 				if(prev_dda->F_end != crossF) {
 					// Third reverse pass: slow the previous move to end at the target crossing speed.
-					sersendf_P(PSTR("Third pass needed - unimplemented!\r\n"));
-					// TODO: implement this - for now it will be a rough transition
-				}
+					up = ACCELERATE_RAMP_LEN(prev_dda->endpoint.F) - ACCELERATE_RAMP_LEN(prev_dda->F_start);
+					down = ACCELERATE_RAMP_LEN(prev_dda->endpoint.F) - ACCELERATE_RAMP_LEN(crossF);
+					sersendf_P(PSTR("3d pass - prev full up: %lu - prev full down: %lu\r\n"), up, down);
 
+					// Test if both the ramp up and ramp down fit within the move
+					if(up+down > prev_dda->total_steps) {
+						// Test if we can reach the crossF rate
+						if(up-down > prev_dda->total_steps) {
+							// Cannot reach crossF - this should not happen!
+							sersendf_P(PSTR("FATAL ERROR during reverse pass ramp scale, ramp is too long: up:%lu ; len:%lu ; target speed: %lu\r\n"),
+								up, prev_dda->total_steps, crossF);
+							dda_emergency_shutdown(NULL);
+						} else {
+							uint32_t diff = (up + down - prev_dda->total_steps) / 2;
+							up -= diff;
+							down -= diff;
+						}
+					}
+					// Assign the results
+					prev_dda->rampup_steps = up;
+					prev_dda->rampdown_steps = prev_dda->total_steps - down;
+					prev_dda->F_end = crossF;
+				}
 
 				// Adjust the timeout to match the maximum speed
 				sersendf_P(PSTR("LA: (%lu) Fs=%lu, len=%lu, up=%lu, down=%lu, Fe=%lu <=> (%lu) Fs=%lu, len=%lu, up=%lu, down=%lu, Fe=%lu\r\n\r\n"),
