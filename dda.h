@@ -203,6 +203,15 @@ typedef struct {
 	uint32_t					rampdown_steps;
 	/// 24.8 fixed point timer value, maximum speed
 	uint32_t					c_min;
+	#ifdef LOOKAHEAD
+	// With the look-ahead functionality, it is possible to retain physical
+	// movement between G1 moves. These variables keep track of the entry and exit
+	// speeds between moves.
+	// Note: the planner always makes sure the movement can be stopped within the
+	// last move; as a result a lot of small moves will still limit the speed.
+	uint32_t					F_start;
+	uint32_t					F_end;
+	#endif
 	#endif
 	#ifdef ACCELERATION_TEMPORAL
 	uint32_t					x_step_interval; ///< time between steps on X axis
