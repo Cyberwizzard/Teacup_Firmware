@@ -22,7 +22,7 @@
 //#include "graycode.c"
 
 // Used for look-ahead debugging
-#if 0
+#ifdef LOOKAHEAD_DEBUG_VERBOSE
 #define serprintf(...) sersendf_P(__VA_ARGS__)
 #else
 #define serprintf(...)
@@ -676,6 +676,13 @@ void dda_create(DDA *dda, TARGET *target, DDA *prev_dda) {
 				uint32_t crossF = prev_F;
 				if(crossF > target->F) crossF = target->F;
 
+				// TODO: Remove this sanity test when we know its all working
+				if(crossF > target->F || crossF > prev_F) {
+					serprintf(PSTR("\r\nError:: prev_F:%lu ; this F:%lu ; crossF:%lu\r\n"),
+							prev_F, target->F, crossF);
+					dda_emergency_shutdown(PSTR("Speeds exceeded! 1"));
+				}
+
 				// If the jerk is too big, scale the proposed cross speed
 				if(jerk > LOOKAHEAD_MAX_JERK) {
 					serprintf(PSTR("Jerk too big: scale cross speed\r\n"));
@@ -689,6 +696,13 @@ void dda_create(DDA *dda, TARGET *target, DDA *prev_dda) {
 					// Sanity: make sure we never exceed the maximum speed of a move
 					if(crossF > target->F) crossF = target->F;
 					if(crossF > prev_F) crossF = prev_F;
+				}
+
+				// TODO: Remove this sanity test when we know its all working
+				if(crossF > target->F || crossF > prev_F) {
+					serprintf(PSTR("\r\nError: jerk: prev_F:%lu ; this F:%lu ; crossF:%lu\r\n"),
+							prev_F, target->F, crossF);
+					dda_emergency_shutdown(PSTR("Speeds exceeded! 2"));
 				}
 
 				serprintf(PSTR("Initial crossing speed: %lu\r\n"), crossF);
@@ -711,8 +725,9 @@ void dda_create(DDA *dda, TARGET *target, DDA *prev_dda) {
 						uint32_t prestep = ACCELERATE_RAMP_LEN2(prev_F_start, ramp_scaler);
 						// Calculate what feed rate we can reach during this move
 						crossF = dda_steps_to_velocity(prestep+prev_total_steps);
-						// Make sure we do not exceed the target speed
+						// Make sure we do not exceed the target speeds
 						if(crossF > prev_F) crossF = prev_F;
+						if(crossF > target->F) crossF = target->F;
 						// The problem with the 'dda_steps_to_velocity' is that it will produce a
 						// rounded result. Use it to obtain an exact amount of steps needed to reach
 						// that speed and set that as the ramp up; we might stop accelerating for a
@@ -723,6 +738,9 @@ void dda_create(DDA *dda, TARGET *target, DDA *prev_dda) {
 						if(up > prev_total_steps) {
 							sersendf_P(PSTR("FATAL ERROR during prev ramp scale, ramp is too long: up:%lu ; len:%lu ; target speed: %lu\r\n"),
 								up, prev_total_steps, crossF);
+							sersendf_P(PSTR("F_start:%lu ; F:%lu ; crossF:%lu\r\n"),
+								prev_F_start, prev_F, crossF);
+
 							dda_emergency_shutdown(PSTR("LA prev ramp scale, ramp is too long"));
 						}
 						if(crossF > prev_F) {
@@ -756,6 +774,12 @@ void dda_create(DDA *dda, TARGET *target, DDA *prev_dda) {
 				prev_rampdown = prev_total_steps - down;
 				prev_F_end = crossF;
 
+				// TODO: Remove this sanity test when we know its all working
+				if(crossF > target->F) {
+					serprintf(PSTR("This target speed exceeded!: F_start:%lu ; F:%lu ; prev_F_end:%lu\r\n"), crossF, target->F);
+					dda_emergency_shutdown(PSTR("This target speed exceeded"));
+				}
+
 				// Forward check 2: test if we can actually reach the target speed in this move.
 				// If not: determine obtainable speed and adjust crossF accordingly. If that
 				// happens, a third (reverse) pass is needed to lower the speeds in the previous move...
@@ -775,6 +799,8 @@ void dda_create(DDA *dda, TARGET *target, DDA *prev_dda) {
 						up = 0;
 						// Calculate what crossing rate we can reach: total/down * F
 						crossF = dda_steps_to_velocity(dda->total_steps);
+						// Speed limit: never exceed the target rate
+						if(crossF > target->F) crossF = target->F;
 						// crossF will be conservative: calculate the actual ramp down length
 						down = ACCELERATE_RAMP_LEN2(crossF, ramp_scaler);
 
@@ -799,6 +825,7 @@ void dda_create(DDA *dda, TARGET *target, DDA *prev_dda) {
 						serprintf(PSTR("Ramp down speed: %lu mm/s\r\n"), dda_steps_to_velocity(down));
 					}
 				}
+
 				// Assign the results
 				this_rampup = up;
 				this_rampdown = dda->total_steps - down;
@@ -857,11 +884,18 @@ void dda_create(DDA *dda, TARGET *target, DDA *prev_dda) {
 					prev_F_end = crossF;
 				}
 
-				serprintf(PSTR("LA: (%lu) Fs=%lu, len=%lu, up=%lu, down=%lu, Fe=%lu <=> (%lu) Fs=%lu, len=%lu, up=%lu, down=%lu, Fe=%lu\r\n\r\n"),
+				#ifdef LOOKAHEAD_DEBUG
+				if(crossF > target->F || crossF > prev_F)
+					dda_emergency_shutdown(PSTR("Lookahead exceeded speed limits in crossing!"));
+
+				// When debugging, print the 2 moves we joined
+				// Legenda: Fs=F_start, len=# of steps, up/down=# steps in ramping, Fe=F_end
+				serprintf(PSTR("LA: (%lu) Fs=%lu, len=%lu, up=%lu, down=%lu, Fe=%lu <=> (%lu) Fs=%lu, len=%lu, up=%lu, down=%lu, Fe=0\r\n\r\n"),
 					moveno-1, prev_dda->F_start, prev_dda->total_steps, prev_dda->rampup_steps,
 					prev_dda->total_steps-prev_dda->rampdown_steps, prev_dda->F_end,
 					moveno, dda->F_start, dda->total_steps, dda->rampup_steps,
-					dda->total_steps - dda->rampdown_steps, dda->F_end);
+					dda->total_steps - this_rampdown);
+				#endif
 
 				// Determine if we are fast enough - if not, just leave the moves
 				if(prev_dda->live != 0)
