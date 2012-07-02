@@ -28,9 +28,15 @@
 // Note: the floating point bit is optimized away during compilation
 #define ACCELERATE_RAMP_LEN(speed) (((speed)*(speed)) / (uint32_t)((7200000.0f * ACCELERATION) / (float)STEPS_PER_M_X))
 // This is the same to ACCELERATE_RAMP_LEN but now the steps per m can be switched.
-// TODO: Can this float be removed?
+// Note: use this with a macro so the float is removed by the preprocessor
 #define ACCELERATE_RAMP_SCALER(spm) (uint32_t)((7200000.0f * ACCELERATION) / (float)spm)
 #define ACCELERATE_RAMP_LEN2(speed, scaler) (((speed)*(speed)) / (scaler))
+
+// Pre-calculated factors to determine ramp lengths for all axis
+#define ACCELERATE_SCALER_X ACCELERATE_RAMP_SCALER(STEPS_PER_M_X)
+#define ACCELERATE_SCALER_Y ACCELERATE_RAMP_SCALER(STEPS_PER_M_Y)
+#define ACCELERATE_SCALER_Z ACCELERATE_RAMP_SCALER(STEPS_PER_M_Z)
+#define ACCELERATE_SCALER_E ACCELERATE_RAMP_SCALER(STEPS_PER_M_E)
 #endif
 
 #ifdef LOOKAHEAD
@@ -310,6 +316,7 @@ void dda_new_startpoint(void) {
 void dda_create(DDA *dda, TARGET *target, DDA *prev_dda) {
 	uint32_t	steps, x_delta_um, y_delta_um, z_delta_um, e_delta_um;
 	uint32_t	distance, c_limit, c_limit_calc;
+	enum axis_e {X,Y,Z,E} leading = X;	// Used to keep track of the leading axis (= axis with most steps)
 	#ifdef ACCELERATION_RAMPING
 	uint32_t ramp_scaler = 1;			// Used in the calculation for ramp length - calculated based on leading axis
 	#endif
@@ -328,7 +335,7 @@ void dda_create(DDA *dda, TARGET *target, DDA *prev_dda) {
 		uint32_t this_F_start, this_rampup, this_rampdown;
 	#endif
 
-	// initialise DDA to a known state
+	// initialize DDA to a known state
 	dda->allflags = 0;
 
 	if (DEBUG_DDA && (debug_flags & DEBUG_DDA))
@@ -388,28 +395,19 @@ void dda_create(DDA *dda, TARGET *target, DDA *prev_dda) {
 	if (DEBUG_DDA && (debug_flags & DEBUG_DDA))
 		sersendf_P(PSTR("%ld,%ld,%ld,%ld] ["), target->X - startpoint.X, target->Y - startpoint.Y, target->Z - startpoint.Z, target->E - startpoint.E);
 
-	int leading_axis = 0;
 	dda->total_steps = dda->x_delta;
 	if (dda->y_delta > dda->total_steps) {
 		dda->total_steps = dda->y_delta;
-		leading_axis = 1;
+		leading = Y;
 	}
 	if (dda->z_delta > dda->total_steps) {
 		dda->total_steps = dda->z_delta;
-		leading_axis = 2;
+		leading = Z;
 	}
 	if (dda->e_delta > dda->total_steps) {
 		dda->total_steps = dda->e_delta;
-		leading_axis = 3;
+		leading = Y;
 	}
-	#ifdef ACCELERATION_RAMPING
-	switch(leading_axis) {
-	case 0:	ramp_scaler = ACCELERATE_RAMP_SCALER(STEPS_PER_M_X); break;
-	case 1:	ramp_scaler = ACCELERATE_RAMP_SCALER(STEPS_PER_M_Y); break;
-	case 2:	ramp_scaler = ACCELERATE_RAMP_SCALER(STEPS_PER_M_Z); break;
-	case 3:	ramp_scaler = ACCELERATE_RAMP_SCALER(STEPS_PER_M_E); break;
-	}
-	#endif
 
 	if (DEBUG_DDA && (debug_flags & DEBUG_DDA))
 		sersendf_P(PSTR("ts:%lu"), dda->total_steps);
@@ -565,6 +563,14 @@ void dda_create(DDA *dda, TARGET *target, DDA *prev_dda) {
 			//sersendf_P(PSTR("rampup calc %lu\n"), dda->rampup_steps);
 			//dda->rampup_steps = 100000; // replace mis-calculation by a safe value
 			// End of wrong section.
+
+			// Since we use the leading axis multiple times, assign it to a variable
+			switch(leading) {
+				case X:	ramp_scaler = ACCELERATE_SCALER_X; break;
+				case Y:	ramp_scaler = ACCELERATE_SCALER_Y; break;
+				case Z:	ramp_scaler = ACCELERATE_SCALER_Z; break;
+				case E:	ramp_scaler = ACCELERATE_SCALER_E; break;
+			}
 
 			/**
 			 * Assuming: F is in mm/min, STEPS_PER_M_X is in steps/m, ACCELERATION is in mm/s²
