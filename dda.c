@@ -584,12 +584,11 @@ void dda_create(DDA *dda, TARGET *target, DDA *prev_dda) {
 			 * ((speed*speed) / (uint32_t)((7200000.0f * ACCELERATION) / (float)STEPS_PER_M_X))
 			 */
 			if(target->F > 65534) target->F = 65534;
-			uint32_t ramp_steps = ACCELERATE_RAMP_LEN2(target->F, ramp_scaler);
-			dda->rampup_steps = ramp_steps;
+			dda->rampup_steps = ACCELERATE_RAMP_LEN2(target->F, ramp_scaler);
 			if (dda->rampup_steps > dda->total_steps / 2)
-				dda->rampdown_steps = dda->rampup_steps = dda->total_steps / 2;
-			else
-				dda->rampdown_steps = dda->total_steps - ramp_steps;
+				dda->rampup_steps = dda->total_steps / 2;
+			// Mirror the ramp up
+			dda->rampdown_steps = dda->total_steps - dda->rampup_steps;
 
 			#ifdef LOOKAHEAD
 			// Look-ahead: attempt to join moves into smooth movements
