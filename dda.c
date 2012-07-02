@@ -21,6 +21,18 @@
 #include	"config.h"
 //#include "graycode.c"
 
+#ifndef ACCELERATION_RAMPING
+// Only enable the lookahead bits if ramping acceleration is enabled
+#undef LOOKAHEAD
+#else
+// Note: the floating point bit is optimized away during compilation
+#define ACCELERATE_RAMP_LEN(speed) (((speed)*(speed)) / (uint32_t)((7200000.0f * ACCELERATION) / (float)STEPS_PER_M_X))
+// This is the same to ACCELERATE_RAMP_LEN but now the steps per m can be switched.
+// TODO: Can this float be removed?
+#define ACCELERATE_RAMP_SCALER(spm) (uint32_t)((7200000.0f * ACCELERATION) / (float)spm)
+#define ACCELERATE_RAMP_LEN2(speed, scaler) (((speed)*(speed)) / (scaler))
+#endif
+
 #ifdef LOOKAHEAD
 // Used for look-ahead debugging
 #ifdef LOOKAHEAD_DEBUG_VERBOSE
@@ -28,13 +40,6 @@
 #else
 	#define serprintf(...)
 #endif
-
-// Note: the floating point bit is optimized away during compilation
-#define ACCELERATE_RAMP_LEN(speed) (((speed)*(speed)) / (uint32_t)((7200000.0f * ACCELERATION) / (float)STEPS_PER_M_X))
-// This is the same to ACCELERATE_RAMP_LEN but now the steps per m can be switched.
-// TODO: Can this float be removed?
-#define ACCELERATE_RAMP_SCALER(spm) (uint32_t)((7200000.0f * ACCELERATION) / (float)spm)
-#define ACCELERATE_RAMP_LEN2(speed, scaler) (((speed)*(speed)) / (scaler))
 #endif
 
 #ifdef	DC_EXTRUDER
@@ -305,6 +310,9 @@ void dda_new_startpoint(void) {
 void dda_create(DDA *dda, TARGET *target, DDA *prev_dda) {
 	uint32_t	steps, x_delta_um, y_delta_um, z_delta_um, e_delta_um;
 	uint32_t	distance, c_limit, c_limit_calc;
+	#ifdef ACCELERATION_RAMPING
+	uint32_t ramp_scaler = 1;			// Used in the calculation for ramp length - calculated based on leading axis
+	#endif
 	#ifdef LOOKAHEAD
 		// All values in um
 		static int32_t x_delta_old = 0,y_delta_old = 0,z_delta_old = 0;
@@ -312,7 +320,6 @@ void dda_create(DDA *dda, TARGET *target, DDA *prev_dda) {
 		int32_t jerk = -1;					// Negative jerk means no lookahead
 		static uint32_t moveno = 1;			// Used for debugging the look ahead code (by numbering moves)
 		static uint32_t la_cnt = 0;			// Counter: how many moves did we join?
-		uint32_t ramp_scaler = 1;			// Used in the calculation for ramp length - calculated based on leading axis
 
 		// Calculating the look-ahead settings can take a while; before modifying
 		// the previous move, we need to locally store any values and write them
@@ -344,10 +351,12 @@ void dda_create(DDA *dda, TARGET *target, DDA *prev_dda) {
 	y_delta_um = (uint32_t)labs(target->Y - startpoint.Y);
 	z_delta_um = (uint32_t)labs(target->Z - startpoint.Z);
 
+	#ifdef LOOKAHEAD
 	// Look ahead vectorization: determine the vectors for this move
 	x_delta = target->X - startpoint.X;
 	y_delta = target->Y - startpoint.Y;
 	z_delta = target->Z - startpoint.Z;
+	#endif
 
 	um_to_steps_x(steps, target->X);
 	dda->x_delta = labs(steps - startpoint_steps.X);
@@ -393,12 +402,14 @@ void dda_create(DDA *dda, TARGET *target, DDA *prev_dda) {
 		dda->total_steps = dda->e_delta;
 		leading_axis = 3;
 	}
+	#ifdef ACCELERATION_RAMPING
 	switch(leading_axis) {
 	case 0:	ramp_scaler = ACCELERATE_RAMP_SCALER(STEPS_PER_M_X); break;
 	case 1:	ramp_scaler = ACCELERATE_RAMP_SCALER(STEPS_PER_M_Y); break;
 	case 2:	ramp_scaler = ACCELERATE_RAMP_SCALER(STEPS_PER_M_Z); break;
 	case 3:	ramp_scaler = ACCELERATE_RAMP_SCALER(STEPS_PER_M_E); break;
 	}
+	#endif
 
 	if (DEBUG_DDA && (debug_flags & DEBUG_DDA))
 		sersendf_P(PSTR("ts:%lu"), dda->total_steps);
@@ -862,7 +873,9 @@ void dda_create(DDA *dda, TARGET *target, DDA *prev_dda) {
 	if (DEBUG_DDA && (debug_flags & DEBUG_DDA))
 		serial_writestr_P(PSTR("] }\n"));
 
+	#ifdef LOOKAHEAD
 	moveno++;
+	#endif
 
 	// next dda starts where we finish
 	memcpy(&startpoint, target, sizeof(TARGET));
@@ -1296,7 +1309,6 @@ void dda_step(DDA *dda) {
 		#endif
 		// z stepper is only enabled while moving
 		z_disable();
-		serprintf(PSTR("Move end\r\n"));
 	}
 	else
 		steptimeout = 0;
