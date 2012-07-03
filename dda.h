@@ -90,6 +90,9 @@
 	types
 */
 
+// Enum to denote an axis
+enum axis_e {X,Y,Z,E};
+
 /**
 	\struct TARGET
 	\brief target is simply a point in space/time
@@ -203,6 +206,8 @@ typedef struct {
 	uint32_t					rampdown_steps;
 	/// 24.8 fixed point timer value, maximum speed
 	uint32_t					c_min;
+	// Axis used as leading axis (with most steps) for this move
+	enum axis_e					lead;
 	#ifdef LOOKAHEAD
 	// With the look-ahead functionality, it is possible to retain physical
 	// movement between G1 moves. These variables keep track of the entry and exit

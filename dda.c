@@ -37,6 +37,9 @@
 #define ACCELERATE_SCALER_Y ACCELERATE_RAMP_SCALER(STEPS_PER_M_Y)
 #define ACCELERATE_SCALER_Z ACCELERATE_RAMP_SCALER(STEPS_PER_M_Z)
 #define ACCELERATE_SCALER_E ACCELERATE_RAMP_SCALER(STEPS_PER_M_E)
+
+// To have a oneliner to fetch the correct scaler (pass the enum axis_e here)
+#define ACCELERATE_SCALER(axis) ((axis==X)?ACCELERATE_SCALER_X:((axis==Y)?ACCELERATE_SCALER_Y:((axis==Z)?ACCELERATE_SCALER_Z:ACCELERATE_SCALER_E)))
 #endif
 
 #ifdef LOOKAHEAD
@@ -316,9 +319,9 @@ void dda_new_startpoint(void) {
 void dda_create(DDA *dda, TARGET *target, DDA *prev_dda) {
 	uint32_t	steps, x_delta_um, y_delta_um, z_delta_um, e_delta_um;
 	uint32_t	distance, c_limit, c_limit_calc;
-	enum axis_e {X,Y,Z,E} leading = X;	// Used to keep track of the leading axis (= axis with most steps)
 	#ifdef ACCELERATION_RAMPING
 	uint32_t ramp_scaler = 1;			// Used in the calculation for ramp length - calculated based on leading axis
+	dda->lead = X;						// Used to keep track of the leading axis (= axis with most steps)
 	#endif
 	#ifdef LOOKAHEAD
 		// All values in um
@@ -333,6 +336,7 @@ void dda_create(DDA *dda, TARGET *target, DDA *prev_dda) {
 		// when we are done (and the previous move is not already active).
 		uint32_t prev_F, prev_F_start, prev_F_end, prev_rampup, prev_rampdown, prev_total_steps;
 		uint32_t this_F_start, this_rampup, this_rampdown;
+		enum axis_e prev_lead;
 	#endif
 
 	// initialize DDA to a known state
@@ -398,15 +402,21 @@ void dda_create(DDA *dda, TARGET *target, DDA *prev_dda) {
 	dda->total_steps = dda->x_delta;
 	if (dda->y_delta > dda->total_steps) {
 		dda->total_steps = dda->y_delta;
-		leading = Y;
+		#ifdef ACCELERATION_RAMPING
+		dda->lead = Y;
+		#endif
 	}
 	if (dda->z_delta > dda->total_steps) {
 		dda->total_steps = dda->z_delta;
-		leading = Z;
+		#ifdef ACCELERATION_RAMPING
+		dda->lead = Z;
+		#endif
 	}
 	if (dda->e_delta > dda->total_steps) {
 		dda->total_steps = dda->e_delta;
-		leading = Y;
+		#ifdef ACCELERATION_RAMPING
+		dda->lead = E;
+		#endif
 	}
 
 	if (DEBUG_DDA && (debug_flags & DEBUG_DDA))
@@ -565,12 +575,7 @@ void dda_create(DDA *dda, TARGET *target, DDA *prev_dda) {
 			// End of wrong section.
 
 			// Since we use the leading axis multiple times, assign it to a variable
-			switch(leading) {
-				case X:	ramp_scaler = ACCELERATE_SCALER_X; break;
-				case Y:	ramp_scaler = ACCELERATE_SCALER_Y; break;
-				case Z:	ramp_scaler = ACCELERATE_SCALER_Z; break;
-				case E:	ramp_scaler = ACCELERATE_SCALER_E; break;
-			}
+			ramp_scaler = ACCELERATE_SCALER(dda->lead);
 
 			/**
 			 * Assuming: F is in mm/min, STEPS_PER_M_X is in steps/m, ACCELERATION is in mm/s²
@@ -621,6 +626,7 @@ void dda_create(DDA *dda, TARGET *target, DDA *prev_dda) {
 				prev_rampup = prev_dda->rampup_steps;
 				prev_rampdown = prev_dda->rampdown_steps;
 				prev_total_steps = prev_dda->total_steps;
+				prev_lead = prev_dda->lead;
 
 				// The initial crossing speed is the minimum between both target speeds
 				// Note: this is a given: the start speed and end speed can NEVER be
@@ -628,6 +634,8 @@ void dda_create(DDA *dda, TARGET *target, DDA *prev_dda) {
 				// Note 2: this provides an upper limit, if needed, the speed is lowered.
 				uint32_t crossF = prev_F;
 				if(crossF > target->F) crossF = target->F;
+
+				sersendf_P(PSTR("j:%lu - XF:%lu"), jerk, crossF);
 
 				// If the jerk is too big, scale the proposed cross speed
 				if(jerk > LOOKAHEAD_MAX_JERK) {
@@ -643,6 +651,7 @@ void dda_create(DDA *dda, TARGET *target, DDA *prev_dda) {
 					// Safety: make sure we never exceed the maximum speed of a move
 					if(crossF > target->F) crossF = target->F;
 					if(crossF > prev_F) crossF = prev_F;
+					sersendf_P(PSTR("=>F:%lu"), crossF);
 				}
 
 				// Show the proposed crossing speed - this might get adjusted below
@@ -651,6 +660,7 @@ void dda_create(DDA *dda, TARGET *target, DDA *prev_dda) {
 				// Forward check: test if we can actually reach the target speed in the previous move
 				// If not: we need to determine the obtainable speed and adjust crossF accordingly.
 				// Note: these ramps can be longer than the move: if so we can not reach top speed.
+				ramp_scaler = ACCELERATE_SCALER(prev_lead);	// Use scaler for previous leading axis
 				uint32_t up = ACCELERATE_RAMP_LEN2(prev_F, ramp_scaler) - ACCELERATE_RAMP_LEN2(prev_F_start, ramp_scaler);
 				uint32_t down = ACCELERATE_RAMP_LEN2(prev_F, ramp_scaler) - ACCELERATE_RAMP_LEN2(crossF, ramp_scaler);
 				// Test if both the ramp up and ramp down fit within the move
@@ -721,6 +731,7 @@ void dda_create(DDA *dda, TARGET *target, DDA *prev_dda) {
 				// Forward check 2: test if we can actually reach the target speed in this move.
 				// If not: determine obtainable speed and adjust crossF accordingly. If that
 				// happens, a third (reverse) pass is needed to lower the speeds in the previous move...
+				ramp_scaler = ACCELERATE_SCALER(dda->lead);	// Use scaler for current leading axis
 				up = ACCELERATE_RAMP_LEN2(target->F, ramp_scaler) - ACCELERATE_RAMP_LEN2(crossF, ramp_scaler);
 				down = ACCELERATE_RAMP_LEN2(target->F, ramp_scaler);
 				// Test if both the ramp up and ramp down fit within the move
@@ -777,6 +788,7 @@ void dda_create(DDA *dda, TARGET *target, DDA *prev_dda) {
 				// between this move and the previous move...
 				if(prev_F_end != crossF) {
 					// Third reverse pass: slow the previous move to end at the target crossing speed.
+					ramp_scaler = ACCELERATE_SCALER(prev_lead);	// Use scaler for previous leading axis (again)
 					// Note: use signed values so we  can check if results go below zero
 					// Note 2: when up2 and/or down2 are below zero from the start, you found a bug in the logic above.
 					int32_t up2 = ACCELERATE_RAMP_LEN2(prev_F, ramp_scaler) - ACCELERATE_RAMP_LEN2(prev_F_start, ramp_scaler);
