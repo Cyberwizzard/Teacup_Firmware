@@ -655,9 +655,11 @@ void dda_create(DDA *dda, TARGET *target, DDA *prev_dda) {
 				uint32_t down = ACCELERATE_RAMP_LEN2(prev_F, ramp_scaler) - ACCELERATE_RAMP_LEN2(crossF, ramp_scaler);
 				// Test if both the ramp up and ramp down fit within the move
 				if(up+down > prev_total_steps) {
-					// Test if we can reach the crossF rate
-					if(up-down > prev_total_steps) {
-						// Cannot reach crossF, lower it and adjust ramps
+					// Test if we can reach the crossF rate: if the difference between both ramps is larger
+					// than the move itself, there is no ramp up or down from F_start to crossF...
+					uint32_t diff = (up>down) ? up-down : down-up;
+					if(diff > prev_total_steps) {
+						// Cannot reach crossF from F_start, lower crossF and adjust both ramp-up and down
 						down = 0;
 						// Before we can determine how fast we can go in this move, we need the number of
 						// steps needed to reach the entry speed.
