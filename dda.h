@@ -113,6 +113,19 @@ typedef struct {
 } TARGET;
 
 /**
+ *  \struct VECTOR4D
+ *  \brief 4 dimensional vector used to describe the difference between moves.
+ *
+ *  Units are in micrometers and usually based off 'TARGET'.
+ */
+typedef struct {
+	int32_t	X;
+	int32_t Y;
+	int32_t Z;
+	int32_t E;
+} VECTOR4D;
+
+/**
 	\struct MOVE_STATE
 	\brief this struct is made for tracking the current state of the movement
 
@@ -214,6 +227,9 @@ typedef struct {
 	// speeds between moves.
 	uint32_t					F_start;
 	uint32_t					F_end;
+	// Displacement vector, in um, based between the difference of the starting point and the target.
+	// Required to obtain the jerk between 2 moves. Note: x_delta and co are in steps, not um.
+	VECTOR4D					delta;
 	#endif
 	#endif
 	#ifdef ACCELERATION_TEMPORAL

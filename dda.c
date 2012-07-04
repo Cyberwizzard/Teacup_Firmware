@@ -296,9 +296,7 @@ void dda_emergency_shutdown(PGM_P msg) {
  * Note: the planner always makes sure the movement can be stopped within the
  * last move (= 'current'); as a result a lot of small moves will still limit the speed.
  */
-void dda_join_moves(DDA *prev, DDA *current,
-		int32_t x_delta, int32_t y_delta, int32_t z_delta, int32_t e_delta,
-		int32_t x_delta_old, int32_t y_delta_old, int32_t z_delta_old, int32_t e_delta_old) {
+void dda_join_moves(DDA *prev, DDA *current) {
 	// Calculating the look-ahead settings can take a while; before modifying
 	// the previous move, we need to locally store any values and write them
 	// when we are done (and the previous move is not already active).
@@ -313,25 +311,22 @@ void dda_join_moves(DDA *prev, DDA *current,
 	static uint32_t la_cnt = 0;			// Counter: how many moves did we join?
 	uint32_t ramp_scaler;				// Scale factor in the calculation to obtain ramp lengths for given speeds
 	#ifdef LOOKAHEAD_DEBUG
-	uint32_t moveno = 1;				// Debug counter to number the moves - helps while debugging
+	static uint32_t moveno = 0;			// Debug counter to number the moves - helps while debugging
+	moveno++;
 	#endif
 
 	// Look-ahead: attempt to join moves into smooth movements
 	// Note: moves are only modified after the calculations are complete.
 	// Only prepare for look-ahead if we have 2 available moves to
 	// join and the Z axis is unused (for now, Z axis moves are NOT joined).
-	if(prev!=NULL && prev->live==0 && z_delta_old==z_delta) {
+	if(prev!=NULL && prev->live==0 && prev->delta.Z==current->delta.Z) {
 		// Calculate the jerk if the previous move and this move would be joined
 		// together at full speed.
-		// Todo: since we regard the deltas as unitless vectors, perhaps we could
-		// switch to the steps instead? Would that be useful (less chance on overflow)?
-		jerk = dda_jerk_size_2d(x_delta_old, y_delta_old, prev->endpoint.F,
-				x_delta, y_delta, current->endpoint.F);
+		jerk = dda_jerk_size_2d(prev->delta.X, prev->delta.Y, prev->endpoint.F,
+				current->delta.X, current->delta.Y, current->endpoint.F);
 		serprintf(PSTR("Jerk: %lu\r\n"), jerk);
 	} else {
-		// Move already executing: abort the join
-		serprintf(PSTR("Move already active - no LA\r\n"));
-		moveno++;
+		// Move already executing or Z moved: abort the join
 		return;
 	}
 
@@ -365,6 +360,12 @@ void dda_join_moves(DDA *prev, DDA *current,
 			// Perform an exponential scaling
 			uint32_t ujerk = (uint32_t)jerk;	// Use unsigned to double the range before overflowing
 			crossF = (crossF*LOOKAHEAD_MAX_JERK*LOOKAHEAD_MAX_JERK)/(ujerk*ujerk);
+
+			// Optimize: if the crossing speed is zero, there is no join possible between these
+			// two (fast) moves. Stop calculating and leave the full stop that is currently between
+			// them.
+			if(crossF == 0)
+				return;
 
 			// Safety: make sure we never exceed the maximum speed of a move
 			if(crossF > current->endpoint.F) crossF = current->endpoint.F;
@@ -608,11 +609,6 @@ void dda_create(DDA *dda, TARGET *target, DDA *prev_dda) {
 	uint32_t ramp_scaler = 1;			// Used in the calculation for ramp length - calculated based on leading axis
 	dda->lead = X;						// Used to keep track of the leading axis (= axis with most steps)
 	#endif
-	#ifdef LOOKAHEAD
-		// All values in um
-		static int32_t x_delta_old = 0,y_delta_old = 0,z_delta_old = 0;
-		int32_t x_delta,y_delta,z_delta;
-	#endif
 
 	// initialize DDA to a known state
 	dda->allflags = 0;
@@ -638,10 +634,11 @@ void dda_create(DDA *dda, TARGET *target, DDA *prev_dda) {
 	z_delta_um = (uint32_t)labs(target->Z - startpoint.Z);
 
 	#ifdef LOOKAHEAD
-	// Look ahead vectorization: determine the vectors for this move
-	x_delta = target->X - startpoint.X;
-	y_delta = target->Y - startpoint.Y;
-	z_delta = target->Z - startpoint.Z;
+	// Look ahead vectorization: determine the displacement vectors (in um) for this move
+	dda->delta.X = target->X - startpoint.X;
+	dda->delta.Y = target->Y - startpoint.Y;
+	dda->delta.Z = target->Z - startpoint.Z;
+
 	#endif
 
 	um_to_steps_x(steps, target->X);
@@ -878,14 +875,7 @@ void dda_create(DDA *dda, TARGET *target, DDA *prev_dda) {
 
 			#ifdef LOOKAHEAD
 			// Try to join the new move and the last one in the queue
-			dda_join_moves(prev_dda, dda,
-					x_delta, y_delta, z_delta, 0,
-					x_delta_old, y_delta_old, z_delta_old, 0);
-
-			// Store the deltas for the next iteration
-			x_delta_old = x_delta;
-			y_delta_old = y_delta;
-			z_delta_old = z_delta;
+			dda_join_moves(prev_dda, dda);
 
 			// End of lookahead logic
 			#endif
