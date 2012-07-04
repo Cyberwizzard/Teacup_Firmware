@@ -212,8 +212,6 @@ typedef struct {
 	// With the look-ahead functionality, it is possible to retain physical
 	// movement between G1 moves. These variables keep track of the entry and exit
 	// speeds between moves.
-	// Note: the planner always makes sure the movement can be stopped within the
-	// last move; as a result a lot of small moves will still limit the speed.
 	uint32_t					F_start;
 	uint32_t					F_end;
 	#endif
