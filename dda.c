@@ -42,6 +42,7 @@
 #define ACCELERATE_SCALER(axis) ((axis==X)?ACCELERATE_SCALER_X:((axis==Y)?ACCELERATE_SCALER_Y:((axis==Z)?ACCELERATE_SCALER_Z:ACCELERATE_SCALER_E)))
 
 #define MAX(a,b)	(((a)>(b))?(a):(b))
+#define MIN(a,b)	(((a)<(b))?(a):(b))
 #endif
 
 #ifdef LOOKAHEAD
@@ -405,8 +406,25 @@ void dda_join_moves(DDA *prev, DDA *current) {
 		// Same to the extruder jerk: make sure we do not yank it
 		if(jerk_e > LOOKAHEAD_MAX_JERK_E) {
 			sersendf_P(PSTR("Jerk_e too big: scale cross speed between moves\r\n"));
-			//todo: scale down move
-			return;	// Abort the join if the jerk on the extruder is too big
+			uint32_t crossF2 = MAX(current->endpoint.F, prev_F);
+
+			// Perform an exponential scaling
+			uint32_t ujerk = (uint32_t)jerk_e;	// Use unsigned to double the range before overflowing
+			crossF2 = (crossF2*LOOKAHEAD_MAX_JERK_E*LOOKAHEAD_MAX_JERK_E)/(ujerk*ujerk);
+
+			// Only continue with joining if there is a feasible crossing speed
+			if(crossF2 == 0) return;
+
+			// Safety: make sure the proposed speed is not higher than the target speeds of each move
+			crossF2 = MIN(crossF2, current->endpoint.F);
+			crossF2 = MIN(crossF2, prev_F);
+
+			if(crossF2 > crossF) {
+				sersendf_P(PSTR("Jerk_e: %lu => crossF: %lu (original: %lu)\r\n"), jerk_e, crossF2, crossF);
+			}
+
+			// Pick the crossing speed for these 2 move to be within the jerk limits
+			crossF = MIN(crossF, crossF2);
 		}
 
 		// Show the proposed crossing speed - this might get adjusted below
