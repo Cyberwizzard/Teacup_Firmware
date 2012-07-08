@@ -8,6 +8,7 @@
 #include	<stdlib.h>
 #include	<math.h>
 #include	<avr/interrupt.h>
+#include	<util/atomic.h>
 
 #include	"timer.h"
 #include	"delay.h"
@@ -324,6 +325,7 @@ void dda_join_moves(DDA *prev, DDA *current) {
 	// the previous move, we need to locally store any values and write them
 	// when we are done (and the previous move is not already active).
 	uint32_t prev_F, prev_F_start, prev_F_end, prev_rampup, prev_rampdown, prev_total_steps;
+	uint8_t prev_id;
 	// Similarly, we only want to modify the current move if we have the results of the calculations;
 	// until then, we do not want to touch the current move settings.
 	// Note: we assume 'current' will not be dispatched while this function runs, so we do not to
@@ -363,14 +365,17 @@ void dda_join_moves(DDA *prev, DDA *current) {
 
 	// Make sure we have 2 moves and the previous move is not already active
 	if(prev!=NULL && prev->live==0) {
-		// Copy the values to preserve them during the calculations
-		prev_F = prev->endpoint.F;
-		prev_F_start = prev->F_start;
-		prev_F_end = prev->F_end;
-		prev_rampup = prev->rampup_steps;
-		prev_rampdown = prev->rampdown_steps;
-		prev_total_steps = prev->total_steps;
-		prev_lead = prev->lead;
+		// Perform an atomic copy to preserve volatile parameters during the calculations
+		ATOMIC_BLOCK(ATOMIC_RESTORESTATE) {
+			prev_id = prev->id;
+			prev_F = prev->endpoint.F;
+			prev_F_start = prev->F_start;
+			prev_F_end = prev->F_end;
+			prev_rampup = prev->rampup_steps;
+			prev_rampdown = prev->rampdown_steps;
+			prev_total_steps = prev->total_steps;
+			prev_lead = prev->lead;
+		}
 
 		// The initial crossing speed is the minimum between both target speeds
 		// Note: this is a given: the start speed and end speed can NEVER be
@@ -601,20 +606,22 @@ void dda_join_moves(DDA *prev, DDA *current) {
 			current->total_steps - this_rampdown);
 		#endif
 
-		// Determine if we are fast enough - if not, just leave the moves
-		if(prev->live == 0) {
-			// Do an 'atomic' copy here to apply the values to the moves.
-			// TODO: Make this truly atomic
-			prev->F_end = prev_F_end;
-			prev->rampup_steps = prev_rampup;
-			prev->rampdown_steps = prev_rampdown;
-			current->rampup_steps = this_rampup;
-			current->rampdown_steps = this_rampdown;
-			current->F_end = 0;
-			current->F_start = this_F_start;
-			la_cnt++;
-		} else
-			sersendf_P(PSTR("Error: look ahead not fast enough\r\n"));
+		ATOMIC_BLOCK(ATOMIC_RESTORESTATE) {
+			// Determine if we are fast enough - if not, just leave the moves
+			// Note: to test if the previous move was already executed and replaced by a new
+			// move, we compare the DDA id.
+			if(prev->live == 0 && prev->id == prev_id) {
+				prev->F_end = prev_F_end;
+				prev->rampup_steps = prev_rampup;
+				prev->rampdown_steps = prev_rampdown;
+				current->rampup_steps = this_rampup;
+				current->rampdown_steps = this_rampdown;
+				current->F_end = 0;
+				current->F_start = this_F_start;
+				la_cnt++;
+			} else
+				sersendf_P(PSTR("Error: look ahead not fast enough\r\n"));
+		}
 	}
 }
 #endif
@@ -661,6 +668,9 @@ void dda_create(DDA *dda, TARGET *target, DDA *prev_dda) {
 	#ifdef ACCELERATION_RAMPING
 	dda->lead = X;						// Used to keep track of the leading axis (= axis with most steps)
 	#endif
+	#ifdef LOOKAHEAD
+	static uint8_t idcnt = 0;			// Number the moves to identify them; allowed to overflow
+	#endif
 
 	// initialize DDA to a known state
 	dda->allflags = 0;
@@ -676,6 +686,8 @@ void dda_create(DDA *dda, TARGET *target, DDA *prev_dda) {
 	// Note: original behavior - full stops between moves; if the lookahead fails to finish in time
 	dda->F_start = 0;
 	dda->F_end = 0;
+	// Give this move an identifier
+	dda->id = idcnt++;
 	#endif
 
 // TODO TODO: We should really make up a loop for all axes.
