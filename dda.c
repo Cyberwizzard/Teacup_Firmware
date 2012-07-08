@@ -40,6 +40,8 @@
 
 // To have a oneliner to fetch the correct scaler (pass the enum axis_e here)
 #define ACCELERATE_SCALER(axis) ((axis==X)?ACCELERATE_SCALER_X:((axis==Y)?ACCELERATE_SCALER_Y:((axis==Z)?ACCELERATE_SCALER_Z:ACCELERATE_SCALER_E)))
+
+#define MAX(a,b)	(((a)>(b))?(a):(b))
 #endif
 
 #ifdef LOOKAHEAD
@@ -259,6 +261,26 @@ int dda_jerk_size_2d(int32_t x1, int32_t y1, uint32_t F1, int32_t x2, int32_t y2
 
 	return approx_distance(x1,y1) / maxlen;
 }
+
+/**
+ * Determine the 'jerk' between 2 vectors and their speeds. The jerk can be used to obtain an
+ * acceptable speed for changing directions between moves.
+ * @param x component of 1d vector - used to determine if we go back or forward
+ * @param F feed rate
+ */
+int dda_jerk_size_1d(int32_t x1, uint32_t F1, int32_t x2, uint32_t F2) {
+	if(x1 > 0) x1 = F1;
+	else x1 = -F1;
+	if(x2 > 0) x2 = F2;
+	else x2 = -F2;
+
+	// The difference between the vectors actually depicts the jerk
+	x1 -= x2;
+	if(x1 < 0) x1 = -x1;	// Make sure it remains positive
+
+	//sersendf_P(PSTR("Jerk vector: (%ld, %ld)\r\n"),x1,y1);
+	return x1;
+}
 #endif
 
 /**
@@ -307,13 +329,19 @@ void dda_join_moves(DDA *prev, DDA *current) {
 	// back up the move settings: they will remain constant.
 	uint32_t this_F_start, this_rampup, this_rampdown;
 	enum axis_e prev_lead;
-	int32_t jerk;						// Expresses the forces if we would change directions at full speed
+	int32_t jerk, jerk_e;				// Expresses the forces if we would change directions at full speed
 	static uint32_t la_cnt = 0;			// Counter: how many moves did we join?
-	uint32_t ramp_scaler;				// Scale factor in the calculation to obtain ramp lengths for given speeds
 	#ifdef LOOKAHEAD_DEBUG
 	static uint32_t moveno = 0;			// Debug counter to number the moves - helps while debugging
 	moveno++;
 	#endif
+
+	// Sanity: if the previous move or this one has no actual movement, bail now. (e.g. G1 F1500)
+	if(prev->delta.X==0 && prev->delta.Y==0 && prev->delta.Z==0 && prev->delta.E==0) return;
+	if(current->delta.X==0 && current->delta.Y==0 && current->delta.Z==0 && current->delta.E==0) return;
+
+	sersendf_P(PSTR("Current Delta: %ld,%ld,%ld E:%ld\r\n"), current->delta.X, current->delta.Y, current->delta.Z, current->delta.E);
+	sersendf_P(PSTR("Prev    Delta: %ld,%ld,%ld E:%ld\r\n"), prev->delta.X, prev->delta.Y, prev->delta.Z, prev->delta.E);
 
 	// Look-ahead: attempt to join moves into smooth movements
 	// Note: moves are only modified after the calculations are complete.
@@ -325,6 +353,8 @@ void dda_join_moves(DDA *prev, DDA *current) {
 		jerk = dda_jerk_size_2d(prev->delta.X, prev->delta.Y, prev->endpoint.F,
 				current->delta.X, current->delta.Y, current->endpoint.F);
 		serprintf(PSTR("Jerk: %lu\r\n"), jerk);
+		jerk_e = dda_jerk_size_1d(prev->delta.E, prev->endpoint.F, current->delta.E, current->endpoint.F);
+		serprintf(PSTR("Jerk_e: %lu\r\n"), jerk_e);
 	} else {
 		// Move already executing or Z moved: abort the join
 		return;
@@ -350,8 +380,8 @@ void dda_join_moves(DDA *prev, DDA *current) {
 
 		sersendf_P(PSTR("j:%lu - XF:%lu"), jerk, crossF);
 
-		// If the jerk is too big, scale the proposed cross speed
-		if(jerk > LOOKAHEAD_MAX_JERK) {
+		// If the XY jerk is too big, scale the proposed cross speed
+		if(jerk > LOOKAHEAD_MAX_JERK_XY) {
 			serprintf(PSTR("Jerk too big: scale cross speed between moves\r\n"));
 			// Get the highest speed between both moves
 			if(crossF < prev_F)
@@ -359,7 +389,7 @@ void dda_join_moves(DDA *prev, DDA *current) {
 
 			// Perform an exponential scaling
 			uint32_t ujerk = (uint32_t)jerk;	// Use unsigned to double the range before overflowing
-			crossF = (crossF*LOOKAHEAD_MAX_JERK*LOOKAHEAD_MAX_JERK)/(ujerk*ujerk);
+			crossF = (crossF*LOOKAHEAD_MAX_JERK_XY*LOOKAHEAD_MAX_JERK_XY)/(ujerk*ujerk);
 
 			// Optimize: if the crossing speed is zero, there is no join possible between these
 			// two (fast) moves. Stop calculating and leave the full stop that is currently between
@@ -372,6 +402,12 @@ void dda_join_moves(DDA *prev, DDA *current) {
 			if(crossF > prev_F) crossF = prev_F;
 			sersendf_P(PSTR("=>F:%lu"), crossF);
 		}
+		// Same to the extruder jerk: make sure we do not yank it
+		if(jerk_e > LOOKAHEAD_MAX_JERK_E) {
+			sersendf_P(PSTR("Jerk_e too big: scale cross speed between moves\r\n"));
+			//todo: scale down move
+			return;	// Abort the join if the jerk on the extruder is too big
+		}
 
 		// Show the proposed crossing speed - this might get adjusted below
 		serprintf(PSTR("Initial crossing speed: %lu\r\n"), crossF);
@@ -379,9 +415,8 @@ void dda_join_moves(DDA *prev, DDA *current) {
 		// Forward check: test if we can actually reach the target speed in the previous move
 		// If not: we need to determine the obtainable speed and adjust crossF accordingly.
 		// Note: these ramps can be longer than the move: if so we can not reach top speed.
-		ramp_scaler = ACCELERATE_SCALER(prev_lead);	// Use scaler for previous leading axis
-		uint32_t up = ACCELERATE_RAMP_LEN2(prev_F, ramp_scaler) - ACCELERATE_RAMP_LEN2(prev_F_start, ramp_scaler);
-		uint32_t down = ACCELERATE_RAMP_LEN2(prev_F, ramp_scaler) - ACCELERATE_RAMP_LEN2(crossF, ramp_scaler);
+		uint32_t up = ACCELERATE_RAMP_LEN(prev_F) - ACCELERATE_RAMP_LEN(prev_F_start);
+		uint32_t down = ACCELERATE_RAMP_LEN(prev_F) - ACCELERATE_RAMP_LEN(crossF);
 		// Test if both the ramp up and ramp down fit within the move
 		if(up+down > prev_total_steps) {
 			// Test if we can reach the crossF rate: if the difference between both ramps is larger
@@ -392,7 +427,7 @@ void dda_join_moves(DDA *prev, DDA *current) {
 				down = 0;
 				// Before we can determine how fast we can go in this move, we need the number of
 				// steps needed to reach the entry speed.
-				uint32_t prestep = ACCELERATE_RAMP_LEN2(prev_F_start, ramp_scaler);
+				uint32_t prestep = ACCELERATE_RAMP_LEN(prev_F_start);
 				// Calculate what feed rate we can reach during this move
 				crossF = dda_steps_to_velocity(prestep+prev_total_steps);
 				// Make sure we do not exceed the target speeds
@@ -402,7 +437,7 @@ void dda_join_moves(DDA *prev, DDA *current) {
 				// rounded result. Use it to obtain an exact amount of steps needed to reach
 				// that speed and set that as the ramp up; we might stop accelerating for a
 				// couple of steps but that is better than introducing errors in the moves.
-				up = ACCELERATE_RAMP_LEN2(crossF, ramp_scaler) - prestep;
+				up = ACCELERATE_RAMP_LEN(crossF) - prestep;
 
 				#ifdef LOOKAHEAD_DEBUG
 				// Sanity check: the ramp up should never exceed the move length
@@ -450,9 +485,9 @@ void dda_join_moves(DDA *prev, DDA *current) {
 		// Forward check 2: test if we can actually reach the target speed in this move.
 		// If not: determine obtainable speed and adjust crossF accordingly. If that
 		// happens, a third (reverse) pass is needed to lower the speeds in the previous move...
-		ramp_scaler = ACCELERATE_SCALER(current->lead);	// Use scaler for current leading axis
-		up = ACCELERATE_RAMP_LEN2(current->endpoint.F, ramp_scaler) - ACCELERATE_RAMP_LEN2(crossF, ramp_scaler);
-		down = ACCELERATE_RAMP_LEN2(current->endpoint.F, ramp_scaler);
+		//ramp_scaler = ACCELERATE_SCALER(current->lead);	// Use scaler for current leading axis
+		up = ACCELERATE_RAMP_LEN(current->endpoint.F) - ACCELERATE_RAMP_LEN(crossF);
+		down = ACCELERATE_RAMP_LEN(current->endpoint.F);
 		// Test if both the ramp up and ramp down fit within the move
 		if(up+down > current->total_steps) {
 			// Test if we can reach the crossF rate
@@ -468,7 +503,7 @@ void dda_join_moves(DDA *prev, DDA *current) {
 				// Speed limit: never exceed the target rate
 				if(crossF > current->endpoint.F) crossF = current->endpoint.F;
 				// crossF will be conservative: calculate the actual ramp down length
-				down = ACCELERATE_RAMP_LEN2(crossF, ramp_scaler);
+				down = ACCELERATE_RAMP_LEN(crossF);
 
 				#ifdef LOOKAHEAD_DEBUG
 				// Make sure we can break to a full stop before the move ends
@@ -507,11 +542,11 @@ void dda_join_moves(DDA *prev, DDA *current) {
 		// between this move and the previous move...
 		if(prev_F_end != crossF) {
 			// Third reverse pass: slow the previous move to end at the target crossing speed.
-			ramp_scaler = ACCELERATE_SCALER(prev_lead);	// Use scaler for previous leading axis (again)
+			//ramp_scaler = ACCELERATE_SCALER(current->lead); //todo: prev_lead	// Use scaler for previous leading axis (again)
 			// Note: use signed values so we  can check if results go below zero
 			// Note 2: when up2 and/or down2 are below zero from the start, you found a bug in the logic above.
-			int32_t up2 = ACCELERATE_RAMP_LEN2(prev_F, ramp_scaler) - ACCELERATE_RAMP_LEN2(prev_F_start, ramp_scaler);
-			int32_t down2 = ACCELERATE_RAMP_LEN2(prev_F, ramp_scaler) - ACCELERATE_RAMP_LEN2(crossF, ramp_scaler);
+			int32_t up2 = ACCELERATE_RAMP_LEN(prev_F) - ACCELERATE_RAMP_LEN(prev_F_start);
+			int32_t down2 = ACCELERATE_RAMP_LEN(prev_F) - ACCELERATE_RAMP_LEN(crossF);
 
 			// Test if both the ramp up and ramp down fit within the move
 			if(up2+down2 > prev_total_steps) {
@@ -606,7 +641,6 @@ void dda_create(DDA *dda, TARGET *target, DDA *prev_dda) {
 	uint32_t	steps, x_delta_um, y_delta_um, z_delta_um, e_delta_um;
 	uint32_t	distance, c_limit, c_limit_calc;
 	#ifdef ACCELERATION_RAMPING
-	uint32_t ramp_scaler = 1;			// Used in the calculation for ramp length - calculated based on leading axis
 	dda->lead = X;						// Used to keep track of the leading axis (= axis with most steps)
 	#endif
 
@@ -634,11 +668,11 @@ void dda_create(DDA *dda, TARGET *target, DDA *prev_dda) {
 	z_delta_um = (uint32_t)labs(target->Z - startpoint.Z);
 
 	#ifdef LOOKAHEAD
-	// Look ahead vectorization: determine the displacement vectors (in um) for this move
+	// Look ahead vectorization: determine the displacement vector (in um) for this move
 	dda->delta.X = target->X - startpoint.X;
 	dda->delta.Y = target->Y - startpoint.Y;
 	dda->delta.Z = target->Z - startpoint.Z;
-
+	dda->delta.E = target->e_relative ? target->E : target->E - startpoint.E;
 	#endif
 
 	um_to_steps_x(steps, target->X);
@@ -846,9 +880,6 @@ void dda_create(DDA *dda, TARGET *target, DDA *prev_dda) {
 			//dda->rampup_steps = 100000; // replace mis-calculation by a safe value
 			// End of wrong section.
 
-			// Since we use the leading axis multiple times, assign it to a variable
-			ramp_scaler = ACCELERATE_SCALER(dda->lead);
-
 			/**
 			 * Assuming: F is in mm/min, STEPS_PER_M_X is in steps/m, ACCELERATION is in mm/s²
 			 * Given:
@@ -867,7 +898,7 @@ void dda_create(DDA *dda, TARGET *target, DDA *prev_dda) {
 			 * ((speed*speed) / (uint32_t)((7200000.0f * ACCELERATION) / (float)STEPS_PER_M_X))
 			 */
 			if(target->F > 65534) target->F = 65534;
-			dda->rampup_steps = ACCELERATE_RAMP_LEN2(target->F, ramp_scaler);
+			dda->rampup_steps = ACCELERATE_RAMP_LEN(target->F);
 			if (dda->rampup_steps > dda->total_steps / 2)
 				dda->rampup_steps = dda->total_steps / 2;
 			// Mirror the ramp up
