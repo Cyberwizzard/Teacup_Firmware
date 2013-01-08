@@ -416,13 +416,7 @@ void heater_tick(heater_t h, temp_type_t type, uint16_t current_temp, uint16_t t
 */
 void heater_set(heater_t index, uint8_t value) {
 	if (index >= NUM_HEATERS)
-		return;
-
-        // Hack by Berend: invert the PWM for the bed
-        //if (heaters[index].heater_pin == TEMP_SENSOR_BED)
-        if(index == HEATER_bed) {
-                value = 255 - value;
-        }	        
+		return;        
 
 	heaters_runtime[index].heater_output = value;
 
