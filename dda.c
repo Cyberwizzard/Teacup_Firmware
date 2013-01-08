@@ -27,6 +27,16 @@
 // Only enable the lookahead bits if ramping acceleration is enabled
 #undef LOOKAHEAD
 #else
+// Sanity: make sure the defines are in place
+#ifndef LOOKAHEAD_MAX_JERK_XY
+#error Your config.h does not specify LOOKAHEAD_MAX_JERK_XY while LOOKAHEAD is enabled!
+#warning Try adding #define LOOKAHEAD_MAX_JERK_XY 10 to config.h
+#endif
+#ifndef LOOKAHEAD_MAX_JERK_E
+#error Your config.h does not specify LOOKAHEAD_MAX_JERK_E while LOOKAHEAD is enabled!
+#warning Try adding #define LOOKAHEAD_MAX_JERK_E 10 to config.h
+#endif
+
 // Note: the floating point bit is optimized away during compilation
 #define ACCELERATE_RAMP_LEN(speed) (((speed)*(speed)) / (uint32_t)((7200000.0f * ACCELERATION) / (float)STEPS_PER_M_X))
 // This is the same to ACCELERATE_RAMP_LEN but now the steps per m can be switched.
@@ -216,8 +226,8 @@ void dda_join_moves(DDA *prev, DDA *current) {
 	if(prev->delta.X==0 && prev->delta.Y==0 && prev->delta.Z==0 && prev->delta.E==0) return;
 	if(current->delta.X==0 && current->delta.Y==0 && current->delta.Z==0 && current->delta.E==0) return;
 
-	sersendf_P(PSTR("Current Delta: %ld,%ld,%ld E:%ld\r\n"), current->delta.X, current->delta.Y, current->delta.Z, current->delta.E);
-	sersendf_P(PSTR("Prev    Delta: %ld,%ld,%ld E:%ld\r\n"), prev->delta.X, prev->delta.Y, prev->delta.Z, prev->delta.E);
+	serprintf(PSTR("Current Delta: %ld,%ld,%ld E:%ld Live:%d\r\n"), current->delta.X, current->delta.Y, current->delta.Z, current->delta.E, current->live);
+	serprintf(PSTR("Prev    Delta: %ld,%ld,%ld E:%ld Live:%d\r\n"), prev->delta.X, prev->delta.Y, prev->delta.Z, prev->delta.E, prev->live);
 
 	// Look-ahead: attempt to join moves into smooth movements
 	// Note: moves are only modified after the calculations are complete.
