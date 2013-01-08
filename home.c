@@ -46,10 +46,12 @@ void home_x_negative() {
 		#endif
 		enqueue_home(&t, 0x1, 1);
 
-		// back off slowly
-		t.X = +1000000;
-		t.F = SEARCH_FEEDRATE_X;
-		enqueue_home(&t, 0x1, 0);
+		#ifndef SLOW_HOMING
+			// back off slowly
+			t.X = +1000000;
+			t.F = SEARCH_FEEDRATE_X;
+			enqueue_home(&t, 0x1, 0);
+		#endif
 
 		// set X home
 		queue_wait(); // we have to wait here, see G92
@@ -80,10 +82,12 @@ void home_x_positive() {
 		#endif
 		enqueue_home(&t, 0x1, 1);
 
-		// back off slowly
-		t.X = -1000000;
-		t.F = SEARCH_FEEDRATE_X;
-		enqueue_home(&t, 0x1, 0);
+		#ifndef SLOW_HOMING
+			// back off slowly
+			t.X = -1000000;
+			t.F = SEARCH_FEEDRATE_X;
+			enqueue_home(&t, 0x1, 0);
+		#endif
 
 		// set X home
 		queue_wait();
@@ -112,10 +116,12 @@ void home_y_negative() {
 		#endif
 		enqueue_home(&t, 0x2, 1);
 
-		// back off slowly
-		t.Y = +1000000;
-		t.F = SEARCH_FEEDRATE_Y;
-		enqueue_home(&t, 0x2, 0);
+		#ifndef SLOW_HOMING
+			// back off slowly
+			t.Y = +1000000;
+			t.F = SEARCH_FEEDRATE_Y;
+			enqueue_home(&t, 0x2, 0);
+		#endif
 
 		// set Y home
 		queue_wait();
@@ -146,10 +152,12 @@ void home_y_positive() {
 		#endif
 		enqueue_home(&t, 0x2, 1);
 
-		// back off slowly
-		t.X = -1000000;
-		t.F = SEARCH_FEEDRATE_Y;
-		enqueue_home(&t, 0x2, 0);
+		#ifndef SLOW_HOMING
+			// back off slowly
+			t.Y = -1000000;
+			t.F = SEARCH_FEEDRATE_Y;
+			enqueue_home(&t, 0x2, 0);
+		#endif
 
 		// set Y home
 		queue_wait();
@@ -178,10 +186,12 @@ void home_z_negative() {
 		#endif
 		enqueue_home(&t, 0x4, 1);
 
-		// back off slowly
-		t.Z = +1000000;
-		t.F = SEARCH_FEEDRATE_Z;
-		enqueue_home(&t, 0x4, 0);
+		#ifndef SLOW_HOMING
+			// back off slowly
+			t.Z = +1000000;
+			t.F = SEARCH_FEEDRATE_Z;
+			enqueue_home(&t, 0x4, 0);
+		#endif
 
 		// set Z home
 		queue_wait();
@@ -213,10 +223,12 @@ void home_z_positive() {
 		#endif
 		enqueue_home(&t, 0x4, 1);
 
-		// back off slowly
-		t.Z = -1000000;
-		t.F = SEARCH_FEEDRATE_Z;
-		enqueue_home(&t, 0x4, 0);
+		#ifndef SLOW_HOMING
+			// back off slowly
+			t.Z = -1000000;
+			t.F = SEARCH_FEEDRATE_Z;
+			enqueue_home(&t, 0x4, 0);
+		#endif
 
 		// set Z home
 		queue_wait();

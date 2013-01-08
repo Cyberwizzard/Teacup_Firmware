@@ -72,19 +72,11 @@ void io_init(void) {
 	WRITE(X_DIR_PIN,  0);	SET_OUTPUT(X_DIR_PIN);
 	#ifdef X_MIN_PIN
 		SET_INPUT(X_MIN_PIN);
-		#ifdef USE_INTERNAL_PULLUPS
-			WRITE(X_MIN_PIN, 1);
-		#else
-			WRITE(X_MIN_PIN, 0);
-		#endif
+		WRITE(X_MIN_PIN, 0); // pullup resistors off
 	#endif
 	#ifdef X_MAX_PIN
 		SET_INPUT(X_MAX_PIN);
-		#ifdef USE_INTERNAL_PULLUPS
-			WRITE(X_MAX_PIN, 1);
-		#else
-			WRITE(X_MAX_PIN, 0);
-		#endif
+		WRITE(X_MAX_PIN, 0); // pullup resistors off
 	#endif
 
 	// Y Stepper
@@ -92,19 +84,11 @@ void io_init(void) {
 	WRITE(Y_DIR_PIN,  0);	SET_OUTPUT(Y_DIR_PIN);
 	#ifdef Y_MIN_PIN
 		SET_INPUT(Y_MIN_PIN);
-		#ifdef USE_INTERNAL_PULLUPS
-			WRITE(Y_MIN_PIN, 1);
-		#else
-			WRITE(Y_MIN_PIN, 0);
-		#endif
+		WRITE(Y_MIN_PIN, 0); // pullup resistors off
 	#endif
 	#ifdef Y_MAX_PIN
 		SET_INPUT(Y_MAX_PIN);
-		#ifdef USE_INTERNAL_PULLUPS
-			WRITE(Y_MAX_PIN, 1);
-		#else
-			WRITE(Y_MAX_PIN, 0);
-		#endif
+		WRITE(Y_MAX_PIN, 0); // pullup resistors off
 	#endif
 
 	// Z Stepper
@@ -114,19 +98,11 @@ void io_init(void) {
 	#endif
 	#ifdef Z_MIN_PIN
 		SET_INPUT(Z_MIN_PIN);
-		#ifdef USE_INTERNAL_PULLUPS
-			WRITE(Z_MIN_PIN, 1);
-		#else
-			WRITE(Z_MIN_PIN, 0);
-		#endif
+		WRITE(Z_MIN_PIN, 0); // pullup resistors off
 	#endif
 	#ifdef Z_MAX_PIN
 		SET_INPUT(Z_MAX_PIN);
-		#ifdef USE_INTERNAL_PULLUPS
-			WRITE(Z_MAX_PIN, 1);
-		#else
-			WRITE(Z_MAX_PIN, 0);
-		#endif
+		WRITE(Z_MAX_PIN, 0); // pullup resistors off
 	#endif
 
 	#if defined E_STEP_PIN && defined E_DIR_PIN
@@ -184,70 +160,9 @@ void io_init(void) {
 		SET_OUTPUT(E_ENABLE_PIN);
 	#endif
 
-	// setup PWM timers: fast PWM, no prescaler
-	TCCR0A = MASK(WGM01) | MASK(WGM00);
-	// PWM frequencies in TCCR0B, see page 108 of the ATmega644 reference.
-	TCCR0B = MASK(CS00); // F_CPU / 256 (about 78(62.5) kHz on a 20(16) MHz chip)
-	//TCCR0B = MASK(CS01);              // F_CPU / 256 / 8  (about 9.8(7.8) kHz)
-	//TCCR0B = MASK(CS00) | MASK(CS01); // F_CPU / 256 / 64  (about 1220(977) Hz)
-	//TCCR0B = MASK(CS02);              // F_CPU / 256 / 256  (about 305(244) Hz)
-	#ifndef FAST_PWM
-		TCCR0B = MASK(CS00) | MASK(CS02); // F_CPU / 256 / 1024  (about 76(61) Hz)
-	#endif
-	TIMSK0 = 0;
-	OCR0A = 0;
-	OCR0B = 0;
-
-	TCCR2A = MASK(WGM21) | MASK(WGM20);
-	// PWM frequencies in TCCR2B, see page 156 of the ATmega644 reference.
-	TCCR2B = MASK(CS20); // F_CPU / 256  (about 78(62.5) kHz on a 20(16) MHz chip)
-	//TCCR2B = MASK(CS21);              // F_CPU / 256 / 8  (about 9.8(7.8) kHz)
-	//TCCR2B = MASK(CS20) | MASK(CS21); // F_CPU / 256 / 32  (about 2.4(2.0) kHz)
-	//TCCR2B = MASK(CS22);              // F_CPU / 256 / 64  (about 1220(977) Hz)
-	//TCCR2B = MASK(CS20) | MASK(CS22); // F_CPU / 256 / 128  (about 610(488) Hz)
-	//TCCR2B = MASK(CS21) | MASK(CS22); // F_CPU / 256 / 256  (about 305(244) Hz)
-	#ifndef FAST_PWM
-		TCCR2B = MASK(CS20) | MASK(CS21) | MASK(CS22); // F_CPU / 256 / 1024
-	#endif
-	TIMSK2 = 0;
-	OCR2A = 0;
-	OCR2B = 0;
-
-	#ifdef	TCCR3A
-		TCCR3A = MASK(WGM30);
-		TCCR3B = MASK(WGM32) | MASK(CS30);
-		TIMSK3 = 0;
-		OCR3A = 0;
-		OCR3B = 0;
-	#endif
-
-	#ifdef	TCCR4A
-		TCCR4A = MASK(WGM40);
-		TCCR4B = MASK(WGM42) | MASK(CS40);
-		TIMSK4 = 0;
-		OCR4A = 0;
-		OCR4B = 0;
-	#endif
-
-	#ifdef	TCCR5A
-		TCCR5A = MASK(WGM50);
-		TCCR5B = MASK(WGM52) | MASK(CS50);
-		TIMSK5 = 0;
-		OCR5A = 0;
-		OCR5B = 0;
-	#endif
-
 	#ifdef	STEPPER_ENABLE_PIN
 		power_off();
 	#endif
-
-	// set all heater pins to output
-	do {
-		#undef	DEFINE_HEATER
-		#define	DEFINE_HEATER(name, pin) WRITE(pin, 0); SET_OUTPUT(pin);
-			#include "config.h"
-		#undef DEFINE_HEATER
-	} while (0);
 
 	#ifdef	TEMP_MAX6675
 		// setup SPI
@@ -323,8 +238,6 @@ int main (void)
 			gcode_parse_char(c);
 		}
 
-		ifclock(clock_flag_10ms) {
-			clock_10ms();
-		}
+		clock();
 	}
 }

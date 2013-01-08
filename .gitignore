@@ -1,21 +1,11 @@
-*.o
-*.elf
-*.lst
-*.map
-*.sym
-*.lss
-*.eep
-*.srec
-*.bin
 *.hex
-*.al
-*.i
-*.s
+build
 *~
 
 temporal.png
 temporal_data
 config.h
 ThermistorTable.h
+Makefile
 sim
 doc

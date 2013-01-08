@@ -91,10 +91,6 @@ void queue_step() {
 /// add a move to the movebuffer
 /// \note this function waits for space to be available if necessary, check queue_full() first if waiting is a problem
 /// This is the only function that modifies mb_head and it always called from outside an interrupt.
-void enqueue(TARGET *t) {
-	enqueue_home(t, 0, 0);
-}
-
 void enqueue_home(TARGET *t, uint8_t endstop_check, uint8_t endstop_stop_cond) {
 	// don't call this function when the queue is full, but just in case, wait for a move to complete and free up the space for the passed target
 	while (queue_full())
@@ -158,9 +154,7 @@ void next_move() {
 		// mb_tail to the timer interrupt routine. 
 		mb_tail = t;
 		if (current_movebuffer->waitfor_temp) {
-			#ifndef	REPRAP_HOST_COMPATIBILITY
-				serial_writestr_P(PSTR("Waiting for target temp\n"));
-			#endif
+			serial_writestr_P(PSTR("Waiting for target temp\n"));
 			current_movebuffer->live = 1;
 			setTimer(HEATER_WAIT_TIMEOUT);
 		}
@@ -199,9 +193,6 @@ void queue_flush() {
 
 /// wait for queue to empty
 void queue_wait() {
-	for (;queue_empty() == 0;) {
-		ifclock(clock_flag_10ms) {
-			clock_10ms();
-		}
-	}
+	while (queue_empty() == 0)
+		clock();
 }

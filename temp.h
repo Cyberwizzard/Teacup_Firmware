@@ -27,7 +27,6 @@ typedef enum {
 	TT_AD595,
 	TT_PT100,
 	TT_INTERCOM,
-	TT_NONE,
 	TT_DUMMY,
 } temp_type_t;
 
@@ -41,8 +40,6 @@ uint8_t	temp_achieved(void);
 
 void temp_set(temp_sensor_t index, uint16_t temperature);
 uint16_t temp_get(temp_sensor_t index);
-
-uint8_t temp_all_zero(void);
 
 void temp_print(temp_sensor_t index);
 

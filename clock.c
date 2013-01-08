@@ -8,7 +8,6 @@
 #include	"sersendf.h"
 #include	"dda_queue.h"
 #include	"watchdog.h"
-#include	"temp.h"
 #include	"timer.h"
 #include	"debug.h"
 #include	"heater.h"
@@ -22,22 +21,20 @@
 
 	called from clock_10ms(), do not call directly
 */
-void clock_250ms() {
-	#ifndef	NO_AUTO_IDLE
-	if (temp_all_zero())	{
-		if (steptimeout > (30 * 4)) {
+static void clock_250ms(void) {
+  if (heaters_all_zero()) {
+		if (psu_timeout > (30 * 4)) {
 			power_off();
 		}
 		else {
 			uint8_t save_reg = SREG;
 			cli();
 			CLI_SEI_BUG_MEMORY_BARRIER();
-			steptimeout++;
+			psu_timeout++;
 			MEMORY_BARRIER();
 			SREG = save_reg;
 		}
 	}
-	#endif
 
 	ifclock(clock_flag_1s) {
 		if (DEBUG_POSITION && (debug_flags & DEBUG_POSITION)) {
@@ -65,9 +62,9 @@ void clock_250ms() {
 
 /*! do stuff every 10 milliseconds
 
-	call from ifclock(CLOCK_FLAG_10MS) in busy loops
+	called from clock(), do not call directly
 */
-void clock_10ms() {
+static void clock_10ms(void) {
 	// reset watchdog
 	wd_reset();
 
@@ -77,4 +74,15 @@ void clock_10ms() {
 		clock_250ms();
 	}
 }
+
+/*! do reoccuring stuff
+
+	call it occasionally in busy loops
+*/
+void clock() {
+	ifclock(clock_flag_10ms) {
+		clock_10ms();
+	}
+}
+
 
