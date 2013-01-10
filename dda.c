@@ -345,6 +345,13 @@ void dda_create(DDA *dda, TARGET *target, DDA *prev_dda) {
 			 */
 			if(target->F > 65534) target->F = 65534;
 			dda->rampup_steps = ACCELERATE_RAMP_LEN(target->F);
+			// Quick hack: we do not do Z move joins as jerk on the Z axis is undesirable;
+			// as the ramp length is calculated for XY, its incorrect for Z: apply the original
+			// 'fix' to simply specify a large enough ramp for any speed.
+			if(dda->delta.X==0&&dda->delta.Y==0&&dda->delta.E==0 && dda->delta.Z != 0) {
+				dda->rampup_steps = 100000; // replace mis-calculation by a safe value
+			}
+
 			if (dda->rampup_steps > dda->total_steps / 2)
 				dda->rampup_steps = dda->total_steps / 2;
 			// Mirror the ramp up
