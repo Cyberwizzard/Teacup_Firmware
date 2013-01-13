@@ -19,6 +19,13 @@
 #warning Try adding #define LOOKAHEAD_MAX_JERK_E 10 to config.h
 #endif
 
+// Sanity: the acceleration of Teacup is not implemented properly; as such we can only
+// do move joining when all axis use the same steps per mm. This is usually not an issue
+// for X and Y.
+#if STEPS_PER_M_X != STEPS_PER_M_Y
+#error "Look-ahead requires steps per m to be identical on the X and Y axis (for now)"
+#endif
+
 // Note: the floating point bit is optimized away during compilation
 #define ACCELERATE_RAMP_LEN(speed) (((speed)*(speed)) / (uint32_t)((7200000.0f * ACCELERATION) / (float)STEPS_PER_M_X))
 // This is the same to ACCELERATE_RAMP_LEN but now the steps per m can be switched.
