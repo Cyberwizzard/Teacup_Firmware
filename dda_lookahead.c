@@ -234,7 +234,7 @@ void dda_join_moves(DDA *prev, DDA *current) {
 		uint32_t crossF = prev_F;
 		if(crossF > current->endpoint.F) crossF = current->endpoint.F;
 
-		sersendf_P(PSTR("j:%lu - XF:%lu"), jerk, crossF);
+		//sersendf_P(PSTR("j:%lu - XF:%lu"), jerk, crossF);
 
 		// If the XY jerk is too big, scale the proposed cross speed
 		if(jerk > LOOKAHEAD_MAX_JERK_XY) {
