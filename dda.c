@@ -833,6 +833,11 @@ void dda_step(DDA *dda) {
 	if (move_state.x_steps == 0 && move_state.y_steps == 0 &&
 	    move_state.z_steps == 0 && move_state.e_steps == 0) {
 		dda->live = 0;
+		#ifdef LOOKAHEAD
+		// If look-ahead was using this move, it could have missed our activation:
+		// make sure the ids do not match.
+		dda->id--;
+		#endif
 		#ifdef	DC_EXTRUDER
 			heater_set(DC_EXTRUDER, 0);
 		#endif
