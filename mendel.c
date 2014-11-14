@@ -223,6 +223,9 @@ void init(void) {
 
 	// set up dda
 	dda_init();
+	
+	// set up the linked list in the DDA queue
+	queue_init();
 
 	// start up analog read interrupt loop,
 	// if any of the temp sensors in your config.h use analog interface

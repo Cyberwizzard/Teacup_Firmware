@@ -108,8 +108,7 @@ void enqueue_home(TARGET *t, uint8_t endstop_check, uint8_t endstop_stop_cond) {
 	while (queue_full())
 		delay_us(100);
 
-	uint8_t h = mb_head + 1;
-	h &= (MOVEBUFFER_SIZE - 1);
+	uint8_t h = (mb_head >= MOVEBUFFER_SIZE - 1) ? 0 : mb_head + 1;
 
 	DDA* new_movebuffer = &(movebuffer[h]);
 
@@ -130,7 +129,6 @@ void enqueue_home(TARGET *t, uint8_t endstop_check, uint8_t endstop_stop_cond) {
 	// make certain all writes to global memory
 	// are flushed before modifying mb_head.
 	MEMORY_BARRIER();
-
 	mb_head = h;
 
   uint8_t isdead;
@@ -156,9 +154,13 @@ void enqueue_home(TARGET *t, uint8_t endstop_check, uint8_t endstop_stop_cond) {
 /// timer interrupt is disabled).
 void next_move() {
 	while ((queue_empty() == 0) && (movebuffer[mb_tail].live == 0)) {
+		//WRITE(DEBUG_LED_PIN, 1);
+#ifdef LOOKAHEAD
+		// when moving to the next move, the current move is complete and as such no longer valid
+		movebuffer[mb_tail].valid = 0;
+#endif
 		// next item
-		uint8_t t = mb_tail + 1;
-		t &= (MOVEBUFFER_SIZE - 1);
+		uint8_t t = (mb_tail == MOVEBUFFER_SIZE - 1) ? 0 : mb_tail + 1;
 		DDA* current_movebuffer = &movebuffer[t];
 		// tail must be set before setTimer call as setTimer
 		// reenables the timer interrupt, potentially exposing
@@ -172,7 +174,58 @@ void next_move() {
 		else {
 			dda_start(current_movebuffer);
 		}
+		//WRITE(DEBUG_LED_PIN, 0);
 	} 
+}
+
+/**
+ * Berend: determine how many moves are queued (used in lookahead)
+ */
+uint8_t queue_length() {
+	uint8_t len = 0;
+	if(mb_tail < mb_head) {
+		len = mb_head - mb_tail;
+	} else if(mb_tail == mb_head) {
+		len = (movebuffer[mb_tail].live == 0) ? 0 : 1; //MOVEBUFFER_SIZE; // TODO: this cant be right
+	} else {
+		len = MOVEBUFFER_SIZE - mb_tail + mb_head;
+	}
+	
+	//sersendf_P(PSTR("tail: %d - head: %d - tail live: %d - len: %d\r\n"), mb_tail, mb_head, movebuffer[mb_tail].live, len);
+	
+	return len;
+	
+}
+
+/**
+ * Berend: get a specific move from the queue
+ */
+DDA* queue_get_move(uint8_t id) {
+	//if(queue_empty() != 0) return NULL;
+	//if(id >= queue_length()) return NULL;
+	
+	if(mb_tail + id > MOVEBUFFER_SIZE)
+		id = mb_tail + id - MOVEBUFFER_SIZE;
+	else
+		id = mb_tail + id;
+	return &movebuffer[id];
+}
+
+/**
+ * Initialize the queue; link all DDA objects together for use with lookahead
+ */
+void queue_init() {
+#ifdef LOOKAHEAD
+	// Link all moves in the queue together
+	DDA *p1 = &movebuffer[0], *p2 = NULL;
+	for (uint8_t i = 1; i < MOVEBUFFER_SIZE; i++) {
+		p2 = &movebuffer[i];
+		p1->next_move = p2;
+		p1 = p2;
+	}
+	// Link the last move in the queue to the first
+	p1->next_move = &movebuffer[0];
+#endif
 }
 
 /// DEBUG - print queue.

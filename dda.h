@@ -88,7 +88,7 @@ typedef struct {
 	This struct holds all the details of an individual multi-axis move, including pre-calculated acceleration data.
 	This struct is filled in by dda_create(), called from enqueue(), called mostly from gcode_process() and from a few other places too (eg \file homing.c)
 */
-typedef struct {
+typedef struct DDA_struct {
 	/// this is where we should finish
 	TARGET						endpoint;
 
@@ -135,7 +135,7 @@ typedef struct {
   int32_t           n;
 	/// number of steps accelerating
 	uint32_t					rampup_steps;
-	/// number of last step before decelerating
+	/// number of steps before decelerating (NOT the length of the ramp down)
 	uint32_t					rampdown_steps;
 	/// 24.8 fixed point timer value, maximum speed
 	uint32_t					c_min;
@@ -156,6 +156,9 @@ typedef struct {
   // are the same. Note: we do not need a lot of granularity here: more than
   // MOVEBUFFER_SIZE is already enough.
   uint8_t           id;
+  uint8_t			valid;		// Used for lookahead tree walking: 'old' moves are marked invalid
+  struct DDA_struct *next_move;	// Used for lookahead tree walking: we step pair wise over the queue from a specific starting move
+  uint8_t			optimal;	// Used for lookahead tree walking: when the previous move and this one is already at top speed, stop optimizing it
   #endif
 	#endif
 	#ifdef ACCELERATION_TEMPORAL

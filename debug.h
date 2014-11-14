@@ -2,6 +2,7 @@
 #define	_DEBUG_H
 
 #include	<stdint.h>
+#include	"config.h"
 
 #ifdef	DEBUG
   #define DEBUG_ECHO       1

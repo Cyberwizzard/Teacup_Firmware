@@ -24,6 +24,11 @@ uint8_t queue_full(void);
 uint8_t queue_empty(void);
 DDA *queue_current_movement(void);
 
+// queue traversal methods for lookahead
+uint8_t queue_length(void);
+DDA* queue_get_move(uint8_t id);
+void queue_init(void);
+
 // take one step
 void queue_step(void);
 

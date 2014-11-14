@@ -185,6 +185,8 @@ void dda_create(DDA *dda, TARGET *target) {
     dda->crossF = 0;
     dda->start_steps = 0;
     dda->end_steps = 0;
+	dda->valid = 1;
+	dda->optimal = 0;
     // Give this move an identifier.
     dda->id = idcnt++;
   #endif
@@ -386,22 +388,68 @@ void dda_create(DDA *dda, TARGET *target) {
         dda->rampup_steps = dda->total_steps / 2;
       dda->rampdown_steps = dda->total_steps - dda->rampup_steps;
 
-      #ifdef LOOKAHEAD
-        dda->distance = distance;
+	#ifdef LOOKAHEAD
+		dda->distance = distance;
+		//sersendf_P(PSTR("normal join\r\n"));
+		// Find the maximum crossing speed between this move and the previous one.
+		// Note: only needed once as we can re-use the result every time we walk over the movement queue.
         dda_find_crossing_speed(prev_dda, dda);
-        // TODO: this should become a reverse-stepping through the existing
-        //       movement queue to allow higher speeds for short moves.
-        //       dda_find_crossing_speed() is required only once.
-        dda_join_moves(prev_dda, dda);
-        dda->n = dda->start_steps;
-        if (dda->n == 0)
-          dda->c = pgm_read_dword(&c0_P[dda->fast_axis]);
-        else
-          dda->c = (pgm_read_dword(&c0_P[dda->fast_axis]) *
-                    int_inv_sqrt(dda->n)) >> 13;
-        if (dda->c < dda->c_min)
-          dda->c = dda->c_min;
-      #else
+
+		#if defined(LOOKAHEAD_LEVEL) && LOOKAHEAD_LEVEL > 0
+		// Lookahead: when the movement queue is nearly empty, we only try to combine this new move
+		// with the previous one.
+		uint8_t moves = queue_length();
+		if(moves <= 2) {
+		#endif
+			// Original behavior: only join consecutive moves upon their creation
+			dda_join_moves(prev_dda, dda);
+
+			dda->n = dda->start_steps;
+			if (dda->n == 0)
+				dda->c = pgm_read_dword(&c0_P[dda->fast_axis]);
+			else
+				dda->c = (pgm_read_dword(&c0_P[dda->fast_axis]) *
+						int_inv_sqrt(dda->n)) >> 13;
+			if (dda->c < dda->c_min)
+				dda->c = dda->c_min;
+		#if defined(LOOKAHEAD_LEVEL) && LOOKAHEAD_LEVEL > 0
+		} else {
+			//WRITE(DEBUG_LED_PIN, 1);
+			// Incremental look-ahead: as long as the movement queue stays full, keep optimizing
+			// the queue (up to a certain point).
+			uint8_t max_iter = LOOKAHEAD_LEVEL;	// Limit the number of iterations spent optimizing the movement queue
+			while(moves > 2 && max_iter) {
+				//sersendf_P(PSTR("tree-walker(%d): %d moves\r\n"), max_iter, moves);
+				DDA *move_p = queue_get_move(1); 	// Skip move 0: that one is always active
+				//moves -= 1;							// We skip the first and last move during the join; do not count those
+				
+				// Loop over 'moves' moves to stitch them together
+				while(moves > 0) {
+					//sersendf_P(PSTR("turbo %d\r\n"), moves);
+					dda_join_moves(move_p, move_p->next_move);
+					move_p = move_p->next_move;
+					moves--;
+
+					// After joining, make sure to recalculate the constant used in the acceleration algorithm based on the starting speed
+					move_p->n = move_p->start_steps;
+					if (move_p->n == 0)
+						move_p->c = pgm_read_dword(&c0_P[move_p->fast_axis]);
+					else
+						move_p->c = (pgm_read_dword(&c0_P[move_p->fast_axis]) *
+								int_inv_sqrt(move_p->n)) >> 13;
+					if (move_p->c < move_p->c_min)
+						move_p->c = move_p->c_min;
+				}
+
+				// After this run, check the length of the queue again
+				moves = queue_length();
+				max_iter--;
+			}
+			
+			//WRITE(DEBUG_LED_PIN, 0);
+		}
+		#endif
+	#else
         dda->n = 0;
         dda->c = pgm_read_dword(&c0_P[dda->fast_axis]);
       #endif
