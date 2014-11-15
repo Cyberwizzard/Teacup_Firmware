@@ -418,27 +418,34 @@ void dda_create(DDA *dda, TARGET *target) {
 			// Incremental look-ahead: as long as the movement queue stays full, keep optimizing
 			// the queue (up to a certain point).
 			uint8_t max_iter = LOOKAHEAD_LEVEL;	// Limit the number of iterations spent optimizing the movement queue
+			// Apply default settings in case lookahead is not fast enough:
+			dda->n = 0;
+			dda->c = pgm_read_dword(&c0_P[dda->fast_axis]);
+				
 			while(moves > 2 && max_iter) {
 				//sersendf_P(PSTR("tree-walker(%d): %d moves\r\n"), max_iter, moves);
 				DDA *move_p = queue_get_move(1); 	// Skip move 0: that one is always active
-				//moves -= 1;							// We skip the first and last move during the join; do not count those
-				
+
 				// Loop over 'moves' moves to stitch them together
 				while(moves > 0) {
 					//sersendf_P(PSTR("turbo %d\r\n"), moves);
-					dda_join_moves(move_p, move_p->next_move);
-					move_p = move_p->next_move;
-					moves--;
+					DDA *next_p = move_p->next_move;
+					if(next_p->optimal == 0) {
+						dda_join_moves(move_p, next_p);
 
-					// After joining, make sure to recalculate the constant used in the acceleration algorithm based on the starting speed
-					move_p->n = move_p->start_steps;
-					if (move_p->n == 0)
-						move_p->c = pgm_read_dword(&c0_P[move_p->fast_axis]);
-					else
-						move_p->c = (pgm_read_dword(&c0_P[move_p->fast_axis]) *
-								int_inv_sqrt(move_p->n)) >> 13;
-					if (move_p->c < move_p->c_min)
-						move_p->c = move_p->c_min;
+						// After joining, make sure to recalculate the constant used in the acceleration algorithm based on the starting speed
+						move_p->n = move_p->start_steps;
+						if (move_p->n == 0)
+							move_p->c = pgm_read_dword(&c0_P[move_p->fast_axis]);
+						else
+							move_p->c = (pgm_read_dword(&c0_P[move_p->fast_axis]) *
+									int_inv_sqrt(move_p->n)) >> 13;
+						if (move_p->c < move_p->c_min)
+							move_p->c = move_p->c_min;
+					}
+					
+					move_p = next_p;
+					moves--;
 				}
 
 				// After this run, check the length of the queue again
@@ -453,6 +460,8 @@ void dda_create(DDA *dda, TARGET *target) {
         dda->n = 0;
         dda->c = pgm_read_dword(&c0_P[dda->fast_axis]);
       #endif
+		
+		if(dda->id == 14) queue_dump();
 
 		#elif defined ACCELERATION_TEMPORAL
 			// TODO: calculate acceleration/deceleration for each axis

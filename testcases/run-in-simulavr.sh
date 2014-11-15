@@ -161,8 +161,8 @@ for GCODE_FILE in $*; do
 
     #set origin 10,10;
     plot "${FILE}.data" using (\$2):(\$3) with dots title "position", \
-         "${FILE}.data" using (\$2):(\$4) with dots title "X feedrate", \
-         "${FILE}.data" using (\$2):(\$5) with dots title "Y feedrate"
+         "${FILE}.data" using (\$2):(\$4) with lines title "X feedrate", \
+         "${FILE}.data" using (\$2):(\$5) with lines title "Y feedrate"
 EOF
 
 

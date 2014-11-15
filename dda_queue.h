@@ -28,6 +28,7 @@ DDA *queue_current_movement(void);
 uint8_t queue_length(void);
 DDA* queue_get_move(uint8_t id);
 void queue_init(void);
+void queue_dump(void);
 
 // take one step
 void queue_step(void);

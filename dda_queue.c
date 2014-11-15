@@ -154,7 +154,7 @@ void enqueue_home(TARGET *t, uint8_t endstop_check, uint8_t endstop_stop_cond) {
 /// timer interrupt is disabled).
 void next_move() {
 	while ((queue_empty() == 0) && (movebuffer[mb_tail].live == 0)) {
-		//WRITE(DEBUG_LED_PIN, 1);
+		WRITE(DEBUG_LED_PIN, 1);
 #ifdef LOOKAHEAD
 		// when moving to the next move, the current move is complete and as such no longer valid
 		movebuffer[mb_tail].valid = 0;
@@ -174,7 +174,7 @@ void next_move() {
 		else {
 			dda_start(current_movebuffer);
 		}
-		//WRITE(DEBUG_LED_PIN, 0);
+		WRITE(DEBUG_LED_PIN, 0);
 	} 
 }
 
@@ -226,6 +226,32 @@ void queue_init() {
 	// Link the last move in the queue to the first
 	p1->next_move = &movebuffer[0];
 #endif
+}
+
+void queue_dump() {
+	DDA *m = &movebuffer[0];
+	DDA *s_m = m;
+	uint8_t s_id = m->id, moves = MOVEBUFFER_SIZE;
+	
+	// Find the the move with the lowest ID
+	while(moves-- > 0) {
+		m = m->next_move;
+		if(m->id < s_id) {
+			s_id = m->id;
+			s_m = m;
+		}
+	}
+	
+	moves = MOVEBUFFER_SIZE;
+	m = s_m;
+	sersendf_P(PSTR("buffer len: %d\r\n"), moves);
+	while(moves-- > 0) {
+		sersendf_P(PSTR("%d: SPEEDS entry:%lu,\texit:%lu,\tcrossF:%lu\tLENGTHS len:%lu,\trampup:%lu,\trampdown:%lu\tOPTIMAL:%d\r\n"), 
+			m->id, m->start_steps, m->end_steps, m->crossF, m->total_steps,
+			m->rampup_steps, m->total_steps-m->rampdown_steps, m->optimal
+		);
+		m = m->next_move;
+	}
 }
 
 /// DEBUG - print queue.

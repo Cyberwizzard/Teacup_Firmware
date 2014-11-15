@@ -362,6 +362,7 @@ void process_gcode_command() {
 				queue_wait();
 				for (i = 0; i < NUM_HEATERS; i++)
 					temp_set(i, 0);
+				queue_dump(); 
 				power_off();
         serial_writestr_P(PSTR("\nstop\n"));
 				break;
