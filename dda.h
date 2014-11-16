@@ -97,7 +97,7 @@ typedef struct DDA_struct {
 			// status fields
 			uint8_t						nullmove			:1; ///< bool: no axes move, maybe we wait for temperatures or change speed
 			uint8_t						live					:1; ///< bool: this DDA is running and still has steps to do
-      uint8_t           done          :1; ///< bool: this DDA is done.
+			uint8_t           done          :1; ///< bool: this DDA is done.
 			#ifdef ACCELERATION_REPRAP
 			uint8_t						accel					:1; ///< bool: speed changes during this move, run accel code
 			#endif
@@ -106,71 +106,73 @@ typedef struct DDA_struct {
 			uint8_t						waitfor_temp	:1; ///< bool: wait for temperatures to reach their set values
 
 			// directions
-      // As we have muldiv() now, overflows became much less an issue and
-      // it's likely time to get rid of these flags and use int instead of
-      // uint for distance/speed calculations. --Traumflug 2014-07-04
+			// As we have muldiv() now, overflows became much less an issue and
+			// it's likely time to get rid of these flags and use int instead of
+			// uint for distance/speed calculations. --Traumflug 2014-07-04
 			uint8_t						x_direction		:1; ///< direction flag for X axis
 			uint8_t						y_direction		:1; ///< direction flag for Y axis
 			uint8_t						z_direction		:1; ///< direction flag for Z axis
 			uint8_t						e_direction		:1; ///< direction flag for E axis
 		};
-    uint16_t            allflags; ///< used for clearing all flags
+		uint16_t            allflags; ///< used for clearing all flags
 	};
 
 	// distances
-  axes_uint32_t     delta;       ///< number of steps on each axis
+	axes_uint32_t     			delta;       ///< number of steps on each axis
 
-  // uint8_t        fast_axis;   (see below)
-  uint32_t          total_steps; ///< steps of the "fast" axis
-  uint32_t          fast_um;     ///< movement length of this fast axis
-  uint32_t          fast_spm;    ///< steps per meter of the fast axis
+	// uint8_t        			fast_axis;   (see below)
+	uint32_t          			total_steps; ///< steps of the "fast" axis
+	uint32_t          			fast_um;     ///< movement length of this fast axis
+	uint32_t          			fast_spm;    ///< steps per meter of the fast axis
 
 	uint32_t					c; ///< time until next step, 24.8 fixed point
 
 	#ifdef ACCELERATION_REPRAP
-	uint32_t					end_c; ///< time between 2nd last step and last step
+		uint32_t				end_c; ///< time between 2nd last step and last step
 	#endif
 	#ifdef ACCELERATION_RAMPING
-  /// precalculated step time offset variable
-  int32_t           n;
-	/// number of steps accelerating
-	uint32_t					rampup_steps;
-	/// number of steps before decelerating (NOT the length of the ramp down)
-	uint32_t					rampdown_steps;
-	/// 24.8 fixed point timer value, maximum speed
-	uint32_t					c_min;
-  #ifdef LOOKAHEAD
-  // With the look-ahead functionality, it is possible to retain physical
-  // movement between G1 moves. These variables keep track of the entry and
-  // exit speeds between moves.
-  uint32_t          distance;
-  uint32_t          crossF;
-  // These two are based on the "fast" axis, the axis with the most steps.
-  uint32_t          start_steps; ///< would be required to reach start feedrate
-  uint32_t          end_steps; ///< would be required to stop from end feedrate
-  // Displacement vector, in um, based between the difference of the starting
-  // point and the target. Required to obtain the jerk between 2 moves.
-  // Note: x_delta and co are in steps, not um.
-  axes_int32_t      delta_um;
-  // Number the moves to be able to test at the end of lookahead if the moves
-  // are the same. Note: we do not need a lot of granularity here: more than
-  // MOVEBUFFER_SIZE is already enough.
-  uint8_t           id;
-  uint8_t			valid;		// Used for lookahead tree walking: 'old' moves are marked invalid
-  struct DDA_struct *next_move;	// Used for lookahead tree walking: we step pair wise over the queue from a specific starting move
-  uint8_t			optimal;	// Used for lookahead tree walking: when the previous move and this one is already at top speed, stop optimizing it
-  #endif
+		/// precalculated step time offset variable
+		int32_t           		n;
+		/// number of steps accelerating
+		uint32_t				rampup_steps;
+		/// number of steps before decelerating (NOT the length of the ramp down)
+		uint32_t				rampdown_steps;
+		/// 24.8 fixed point timer value, maximum speed
+		uint32_t				c_min;
+		#ifdef LOOKAHEAD
+			// With the look-ahead functionality, it is possible to retain physical
+			// movement between G1 moves. These variables keep track of the entry and
+			// exit speeds between moves.
+			uint32_t          	distance;
+			uint32_t          	crossF;
+			// These two are based on the "fast" axis, the axis with the most steps.
+			uint32_t          	start_steps; ///< would be required to reach start feedrate
+			uint32_t          	end_steps; ///< would be required to stop from end feedrate
+			// Displacement vector, in um, based between the difference of the starting
+			// point and the target. Required to obtain the jerk between 2 moves.
+			// Note: x_delta and co are in steps, not um.
+			axes_int32_t      	delta_um;
+			// Number the moves to be able to test at the end of lookahead if the moves
+			// are the same. Note: we do not need a lot of granularity here: more than
+			// MOVEBUFFER_SIZE is already enough.
+			uint8_t           	id;
+			#if defined(LOOKAHEAD_LEVEL) && LOOKAHEAD_LEVEL > 0
+				uint8_t				valid;		// multi-pass lookahead: 'old' moves are marked invalid
+				uint8_t				optimal;	// multi-pass lookahead: when the previous move and this one is already at top speed, stop optimizing it
+				struct DDA_struct 	*next_move;	// multi-pass lookahead: we step pair wise over the queue from a specific starting move
+			#endif
+		#endif
 	#endif
 	#ifdef ACCELERATION_TEMPORAL
-  axes_uint32_t     step_interval;   ///< time between steps on each axis
-	uint8_t						axis_to_step;    ///< axis to be stepped on the next interrupt
+		axes_uint32_t     		step_interval;   ///< time between steps on each axis
+		uint8_t					axis_to_step;    ///< axis to be stepped on the next interrupt
 	#endif
 
-  /// Small variables. Many CPUs can access 32-bit variables at word or double
-  /// word boundaries only and fill smaller variables in between with gaps,
-  /// so keep small variables grouped together to reduce the amount of these
-  /// gaps. See e.g. NXP application note AN10963, page 10f.
-  uint8_t           fast_axis;       ///< number of the fast axis
+	/// Small variables. Many CPUs can access 32-bit variables at word or double
+	/// word boundaries only and fill smaller variables in between with gaps,
+	/// so keep small variables grouped together to reduce the amount of these
+	/// gaps. See e.g. NXP application note AN10963, page 10f.
+	uint8_t           			fast_axis;       ///< number of the fast axis
 
 	/// Endstop homing
 	uint8_t endstop_check; ///< Do we need to check endstops? 0x1=Check X, 0x2=Check Y, 0x4=Check Z

@@ -155,92 +155,94 @@ void dda_new_startpoint(void) {
  *    already.
  */
 void dda_create(DDA *dda, TARGET *target) {
-  uint32_t steps;
-  axes_uint32_t delta_um;
+	uint32_t steps;
+	axes_uint32_t delta_um;
 	uint32_t	distance, c_limit, c_limit_calc;
-  enum axis_e i;
-  #ifdef LOOKAHEAD
-  // Number the moves to identify them; allowed to overflow.
-  static uint8_t idcnt = 0;
-  static DDA* prev_dda = NULL;
+	enum axis_e i;
+	#ifdef LOOKAHEAD
+		// Number the moves to identify them; allowed to overflow.
+		static uint8_t idcnt = 0;
+		static DDA* prev_dda = NULL;
 
-  if ((prev_dda && prev_dda->done) || dda->waitfor_temp)
-    prev_dda = NULL;
-  #endif
+		if ((prev_dda && prev_dda->done) || dda->waitfor_temp)
+			prev_dda = NULL;
+	#endif
 
-  if (dda->waitfor_temp)
-    return;
+	if (dda->waitfor_temp)
+		return;
 
 	if (DEBUG_DDA && (debug_flags & DEBUG_DDA))
-    sersendf_P(PSTR("\nCreate: X %lq  Y %lq  Z %lq  F %lu\n"),
-               dda->endpoint.axis[X], dda->endpoint.axis[Y],
-               dda->endpoint.axis[Z], dda->endpoint.F);
+		sersendf_P(PSTR("\nCreate: X %lq  Y %lq  Z %lq  F %lu\n"),
+			dda->endpoint.axis[X], dda->endpoint.axis[Y],
+			dda->endpoint.axis[Z], dda->endpoint.F);
 
 	// we end at the passed target
 	memcpy(&(dda->endpoint), target, sizeof(TARGET));
 
-  #ifdef LOOKAHEAD
-    // Set the start and stop speeds to zero for now = full stops between
-    // moves. Also fallback if lookahead calculations fail to finish in time.
-    dda->crossF = 0;
-    dda->start_steps = 0;
-    dda->end_steps = 0;
-	dda->valid = 1;
-	dda->optimal = 0;
-    // Give this move an identifier.
-    dda->id = idcnt++;
-  #endif
+	#ifdef LOOKAHEAD
+		// Set the start and stop speeds to zero for now = full stops between
+		// moves. Also fallback if lookahead calculations fail to finish in time.
+		dda->crossF = 0;
+		dda->start_steps = 0;
+		dda->end_steps = 0;
+		#if defined(LOOKAHEAD_LEVEL) && LOOKAHEAD_LEVEL > 0
+			dda->valid = 1;
+			dda->optimal = 0;
+		#endif
+		// Give this move an identifier.
+		dda->id = idcnt++;
+	#endif
 
-  for (i = X; i < (target->e_relative ? E : AXIS_COUNT); i++) {
-    delta_um[i] = (uint32_t)abs32(target->axis[i] - startpoint.axis[i]);
+	for (i = X; i < (target->e_relative ? E : AXIS_COUNT); i++) {
+		delta_um[i] = (uint32_t)abs32(target->axis[i] - startpoint.axis[i]);
 
-    steps = um_to_steps(target->axis[i], i);
-    dda->delta[i] = abs32(steps - startpoint_steps.axis[i]);
-    startpoint_steps.axis[i] = steps;
+		steps = um_to_steps(target->axis[i], i);
+		dda->delta[i] = abs32(steps - startpoint_steps.axis[i]);
+		startpoint_steps.axis[i] = steps;
 
-    set_direction(dda, i, (target->axis[i] >= startpoint.axis[i])?1:0);
-    #ifdef LOOKAHEAD
-      // Also displacements in micrometers, but for the lookahead alogrithms.
-      // TODO: this is redundant. delta_um[] and dda->delta_um[] differ by
-      //       just signedness and storage location. Ideally, dda is used
-      //       as storage place only if neccessary (LOOKAHEAD turned on?)
-      //       because this space is multiplied by the movement queue size.
-      dda->delta_um[i] = target->axis[i] - startpoint.axis[i];
-    #endif
-  }
+		set_direction(dda, i, (target->axis[i] >= startpoint.axis[i])?1:0);
+		#ifdef LOOKAHEAD
+			// Also displacements in micrometers, but for the lookahead alogrithms.
+			// TODO: this is redundant. delta_um[] and dda->delta_um[] differ by
+			//       just signedness and storage location. Ideally, dda is used
+			//       as storage place only if neccessary (LOOKAHEAD turned on?)
+			//       because this space is multiplied by the movement queue size.
+			dda->delta_um[i] = target->axis[i] - startpoint.axis[i];
+		#endif
+	}
 
 	if (target->e_relative) {
-    // When we get more extruder axes:
-    // for (i = E; i < AXIS_COUNT; i++) { ...
-    delta_um[E] = abs32(target->axis[E]);
-    dda->delta[E] = abs32(um_to_steps(target->axis[E], E));
-    #ifdef LOOKAHEAD
-      dda->delta_um[E] = target->axis[E];
-    #endif
-    dda->e_direction = (target->axis[E] >= 0)?1:0;
+		// When we get more extruder axes:
+		// for (i = E; i < AXIS_COUNT; i++) { ...
+		delta_um[E] = abs32(target->axis[E]);
+		dda->delta[E] = abs32(um_to_steps(target->axis[E], E));
+		#ifdef LOOKAHEAD
+			dda->delta_um[E] = target->axis[E];
+		#endif
+		dda->e_direction = (target->axis[E] >= 0)?1:0;
 	}
 
 	if (DEBUG_DDA && (debug_flags & DEBUG_DDA))
-    sersendf_P(PSTR("[%ld,%ld,%ld,%ld]"),
-               target->axis[X] - startpoint.axis[X], target->axis[Y] - startpoint.axis[Y],
-               target->axis[Z] - startpoint.axis[Z], target->axis[E] - startpoint.axis[E]);
+		sersendf_P(PSTR("[%ld,%ld,%ld,%ld]"),
+				target->axis[X] - startpoint.axis[X], target->axis[Y] - startpoint.axis[Y],
+				target->axis[Z] - startpoint.axis[Z], target->axis[E] - startpoint.axis[E]);
 
-  // Admittedly, this looks like it's overcomplicated. Why store three 32-bit
-  // values if storing an axis number would be fully sufficient? Well, I'm not
-  // sure, but my feeling says that when we achieve true circles and Beziers,
-  // we'll have total_steps which matches neither of X, Y, Z or E. Accordingly,
-  // keep it for now. --Traumflug
-  for (i = X; i < AXIS_COUNT; i++) {
-    if (i == X || dda->delta[i] > dda->total_steps) {
-      dda->fast_axis = i;
-      dda->total_steps = dda->delta[i];
-      dda->fast_um = delta_um[i];
-      dda->fast_spm = pgm_read_dword(&steps_per_m_P[i]);
-    }
-  }
+	// Admittedly, this looks like it's overcomplicated. Why store three 32-bit
+	// values if storing an axis number would be fully sufficient? Well, I'm not
+	// sure, but my feeling says that when we achieve true circles and Beziers,
+	// we'll have total_steps which matches neither of X, Y, Z or E. Accordingly,
+	// keep it for now. --Traumflug
+	for (i = X; i < AXIS_COUNT; i++) {
+		if (i == X || dda->delta[i] > dda->total_steps) {
+			dda->fast_axis = i;
+			dda->total_steps = dda->delta[i];
+			dda->fast_um = delta_um[i];
+			dda->fast_spm = pgm_read_dword(&steps_per_m_P[i]);
+		}
+	}
 
 	if (DEBUG_DDA && (debug_flags & DEBUG_DDA))
-    sersendf_P(PSTR(" [ts:%lu"), dda->total_steps);
+		sersendf_P(PSTR(" [ts:%lu"), dda->total_steps);
 
 	if (dda->total_steps == 0) {
 		dda->nullmove = 1;
@@ -268,18 +270,18 @@ void dda_create(DDA *dda, TARGET *target) {
 		if (DEBUG_DDA && (debug_flags & DEBUG_DDA))
 			sersendf_P(PSTR(",ds:%lu"), distance);
 
-    #ifdef	ACCELERATION_TEMPORAL
-      // bracket part of this equation in an attempt to avoid overflow:
-      // 60 * 16 MHz * 5 mm is > 32 bits
-      uint32_t move_duration, md_candidate;
+		#ifdef	ACCELERATION_TEMPORAL
+			// bracket part of this equation in an attempt to avoid overflow:
+			// 60 * 16 MHz * 5 mm is > 32 bits
+			uint32_t move_duration, md_candidate;
 
-      move_duration = distance * ((60 * F_CPU) / (target->F * 1000UL));
-      for (i = X; i < AXIS_COUNT; i++) {
-        md_candidate = dda->delta[i] * ((60 * F_CPU) /
-                       (pgm_read_dword(&maximum_feedrate_P[i]) * 1000UL));
-        if (md_candidate > move_duration)
-          move_duration = md_candidate;
-      }
+			move_duration = distance * ((60 * F_CPU) / (target->F * 1000UL));
+			for (i = X; i < AXIS_COUNT; i++) {
+				md_candidate = dda->delta[i] * ((60 * F_CPU) /
+							(pgm_read_dword(&maximum_feedrate_P[i]) * 1000UL));
+				if (md_candidate > move_duration)
+				move_duration = md_candidate;
+			}
 		#else
 			// pre-calculate move speed in millimeter microseconds per step minute for less math in interrupt context
 			// mm (distance) * 60000000 us/min / step (total_steps) = mm.us per step.min
@@ -301,189 +303,190 @@ void dda_create(DDA *dda, TARGET *target) {
 
 		// similarly, find out how fast we can run our axes.
 		// do this for each axis individually, as the combined speed of two or more axes can be higher than the capabilities of a single one.
-    // TODO: instead of calculating c_min directly, it's probably more simple
-    //       to calculate (maximum) move_duration for each axis, like done for
-    //       ACCELERATION_TEMPORAL above. This should make re-calculating the
-    //       allowed F easier.
-    c_limit = 0;
-    for (i = X; i < AXIS_COUNT; i++) {
-      c_limit_calc = (delta_um[i] * 2400L) /
-                     dda->total_steps * (F_CPU / 40000) /
-                     pgm_read_dword(&maximum_feedrate_P[i]);
-      if (c_limit_calc > c_limit)
-        c_limit = c_limit_calc;
-    }
+		// TODO: instead of calculating c_min directly, it's probably more simple
+		//       to calculate (maximum) move_duration for each axis, like done for
+		//       ACCELERATION_TEMPORAL above. This should make re-calculating the
+		//       allowed F easier.
+		c_limit = 0;
+		for (i = X; i < AXIS_COUNT; i++) {
+			c_limit_calc = (delta_um[i] * 2400L) /
+						dda->total_steps * (F_CPU / 40000) /
+						pgm_read_dword(&maximum_feedrate_P[i]);
+			if (c_limit_calc > c_limit)
+				c_limit = c_limit_calc;
+		}
 
 		#ifdef ACCELERATION_REPRAP
-		// c is initial step time in IOclk ticks
-    dda->c = move_duration / startpoint.F;
-    if (dda->c < c_limit)
-      dda->c = c_limit;
-    dda->end_c = move_duration / target->F;
-    if (dda->end_c < c_limit)
-      dda->end_c = c_limit;
-
-		if (DEBUG_DDA && (debug_flags & DEBUG_DDA))
-      sersendf_P(PSTR(",md:%lu,c:%lu"), move_duration, dda->c);
-
-    if (dda->c != dda->end_c) {
-			uint32_t stF = startpoint.F / 4;
-			uint32_t enF = target->F / 4;
-			// now some constant acceleration stuff, courtesy of http://www.embedded.com/design/mcus-processors-and-socs/4006438/Generate-stepper-motor-speed-profiles-in-real-time
-			uint32_t ssq = (stF * stF);
-			uint32_t esq = (enF * enF);
-			int32_t dsq = (int32_t) (esq - ssq) / 4;
-
-			uint8_t msb_ssq = msbloc(ssq);
-			uint8_t msb_tot = msbloc(dda->total_steps);
-
-			// the raw equation WILL overflow at high step rates, but 64 bit math routines take waay too much space
-			// at 65536 mm/min (1092mm/s), ssq/esq overflows, and dsq is also close to overflowing if esq/ssq is small
-			// but if ssq-esq is small, ssq/dsq is only a few bits
-			// we'll have to do it a few different ways depending on the msb locations of each
-			if ((msb_tot + msb_ssq) <= 30) {
-				// we have room to do all the multiplies first
-				if (DEBUG_DDA && (debug_flags & DEBUG_DDA))
-					serial_writechar('A');
-				dda->n = ((int32_t) (dda->total_steps * ssq) / dsq) + 1;
-			}
-			else if (msb_tot >= msb_ssq) {
-				// total steps has more precision
-				if (DEBUG_DDA && (debug_flags & DEBUG_DDA))
-					serial_writechar('B');
-				dda->n = (((int32_t) dda->total_steps / dsq) * (int32_t) ssq) + 1;
-			}
-			else {
-				// otherwise
-				if (DEBUG_DDA && (debug_flags & DEBUG_DDA))
-					serial_writechar('C');
-				dda->n = (((int32_t) ssq / dsq) * (int32_t) dda->total_steps) + 1;
-			}
+			// c is initial step time in IOclk ticks
+			dda->c = move_duration / startpoint.F;
+			if (dda->c < c_limit)
+				dda->c = c_limit;
+			dda->end_c = move_duration / target->F;
+			if (dda->end_c < c_limit)
+				dda->end_c = c_limit;
 
 			if (DEBUG_DDA && (debug_flags & DEBUG_DDA))
-        sersendf_P(PSTR("\n{DDA:CA end_c:%lu, n:%ld, md:%lu, ssq:%lu, esq:%lu, dsq:%lu, msbssq:%u, msbtot:%u}\n"), dda->end_c, dda->n, move_duration, ssq, esq, dsq, msb_ssq, msb_tot);
+				sersendf_P(PSTR(",md:%lu,c:%lu"), move_duration, dda->c);
 
-			dda->accel = 1;
-		}
-		else
-			dda->accel = 0;
-		#elif defined ACCELERATION_RAMPING
-			// yes, this assumes always the x axis as the critical one regarding acceleration. If we want to implement per-axis acceleration, things get tricky ...
-      dda->c_min = move_duration / target->F;
-      if (dda->c_min < c_limit) {
-        dda->c_min = c_limit;
-        dda->endpoint.F = move_duration / dda->c_min;
-      }
+			if (dda->c != dda->end_c) {
+				uint32_t stF = startpoint.F / 4;
+				uint32_t enF = target->F / 4;
+				// now some constant acceleration stuff, courtesy of http://www.embedded.com/design/mcus-processors-and-socs/4006438/Generate-stepper-motor-speed-profiles-in-real-time
+				uint32_t ssq = (stF * stF);
+				uint32_t esq = (enF * enF);
+				int32_t dsq = (int32_t) (esq - ssq) / 4;
 
-      // Lookahead can deal with 16 bits ( = 1092 mm/s), only.
-      if (dda->endpoint.F > 65535)
-        dda->endpoint.F = 65535;
+				uint8_t msb_ssq = msbloc(ssq);
+				uint8_t msb_tot = msbloc(dda->total_steps);
 
-      // Acceleration ramps are based on the fast axis, not the combined speed.
-      dda->rampup_steps =
-        acc_ramp_len(muldiv(dda->fast_um, dda->endpoint.F, distance),
-                     dda->fast_spm);
-
-      if (dda->rampup_steps > dda->total_steps / 2)
-        dda->rampup_steps = dda->total_steps / 2;
-      dda->rampdown_steps = dda->total_steps - dda->rampup_steps;
-
-	#ifdef LOOKAHEAD
-		dda->distance = distance;
-		//sersendf_P(PSTR("normal join\r\n"));
-		// Find the maximum crossing speed between this move and the previous one.
-		// Note: only needed once as we can re-use the result every time we walk over the movement queue.
-        dda_find_crossing_speed(prev_dda, dda);
-
-		#if defined(LOOKAHEAD_LEVEL) && LOOKAHEAD_LEVEL > 0
-		// Lookahead: when the movement queue is nearly empty, we only try to combine this new move
-		// with the previous one.
-		uint8_t moves = queue_length();
-		if(moves <= 2) {
-		#endif
-			// Original behavior: only join consecutive moves upon their creation
-			dda_join_moves(prev_dda, dda);
-
-			dda->n = dda->start_steps;
-			if (dda->n == 0)
-				dda->c = pgm_read_dword(&c0_P[dda->fast_axis]);
-			else
-				dda->c = (pgm_read_dword(&c0_P[dda->fast_axis]) *
-						int_inv_sqrt(dda->n)) >> 13;
-			if (dda->c < dda->c_min)
-				dda->c = dda->c_min;
-		#if defined(LOOKAHEAD_LEVEL) && LOOKAHEAD_LEVEL > 0
-		} else {
-			//WRITE(DEBUG_LED_PIN, 1);
-			// Incremental look-ahead: as long as the movement queue stays full, keep optimizing
-			// the queue (up to a certain point).
-			uint8_t max_iter = LOOKAHEAD_LEVEL;	// Limit the number of iterations spent optimizing the movement queue
-			// Apply default settings in case lookahead is not fast enough:
-			dda->n = 0;
-			dda->c = pgm_read_dword(&c0_P[dda->fast_axis]);
-				
-			while(moves > 2 && max_iter) {
-				//sersendf_P(PSTR("tree-walker(%d): %d moves\r\n"), max_iter, moves);
-				DDA *move_p = queue_get_move(1); 	// Skip move 0: that one is always active
-
-				// Loop over 'moves' moves to stitch them together
-				while(moves > 0) {
-					//sersendf_P(PSTR("turbo %d\r\n"), moves);
-					DDA *next_p = move_p->next_move;
-					if(next_p->optimal == 0) {
-						dda_join_moves(move_p, next_p);
-
-						// After joining, make sure to recalculate the constant used in the acceleration algorithm based on the starting speed
-						move_p->n = move_p->start_steps;
-						if (move_p->n == 0)
-							move_p->c = pgm_read_dword(&c0_P[move_p->fast_axis]);
-						else
-							move_p->c = (pgm_read_dword(&c0_P[move_p->fast_axis]) *
-									int_inv_sqrt(move_p->n)) >> 13;
-						if (move_p->c < move_p->c_min)
-							move_p->c = move_p->c_min;
-					}
-					
-					move_p = next_p;
-					moves--;
+				// the raw equation WILL overflow at high step rates, but 64 bit math routines take waay too much space
+				// at 65536 mm/min (1092mm/s), ssq/esq overflows, and dsq is also close to overflowing if esq/ssq is small
+				// but if ssq-esq is small, ssq/dsq is only a few bits
+				// we'll have to do it a few different ways depending on the msb locations of each
+				if ((msb_tot + msb_ssq) <= 30) {
+					// we have room to do all the multiplies first
+					if (DEBUG_DDA && (debug_flags & DEBUG_DDA))
+						serial_writechar('A');
+					dda->n = ((int32_t) (dda->total_steps * ssq) / dsq) + 1;
+				}
+				else if (msb_tot >= msb_ssq) {
+					// total steps has more precision
+					if (DEBUG_DDA && (debug_flags & DEBUG_DDA))
+						serial_writechar('B');
+					dda->n = (((int32_t) dda->total_steps / dsq) * (int32_t) ssq) + 1;
+				}
+				else {
+					// otherwise
+					if (DEBUG_DDA && (debug_flags & DEBUG_DDA))
+						serial_writechar('C');
+					dda->n = (((int32_t) ssq / dsq) * (int32_t) dda->total_steps) + 1;
 				}
 
-				// After this run, check the length of the queue again
-				moves = queue_length();
-				max_iter--;
+				if (DEBUG_DDA && (debug_flags & DEBUG_DDA))
+					sersendf_P(PSTR("\n{DDA:CA end_c:%lu, n:%ld, md:%lu, ssq:%lu, esq:%lu, dsq:%lu, msbssq:%u, msbtot:%u}\n"), dda->end_c, dda->n, move_duration, ssq, esq, dsq, msb_ssq, msb_tot);
+
+				dda->accel = 1;
 			}
+			else
+				dda->accel = 0;
+		#elif defined ACCELERATION_RAMPING
+			// yes, this assumes always the x axis as the critical one regarding acceleration. If we want to implement per-axis acceleration, things get tricky ...
+			dda->c_min = move_duration / target->F;
+			if (dda->c_min < c_limit) {
+				dda->c_min = c_limit;
+				dda->endpoint.F = move_duration / dda->c_min;
+			}
+
+			// Lookahead can deal with 16 bits ( = 1092 mm/s), only.
+			if (dda->endpoint.F > 65535)
+				dda->endpoint.F = 65535;
+
+			// Acceleration ramps are based on the fast axis, not the combined speed.
+			dda->rampup_steps =
+				acc_ramp_len(muldiv(dda->fast_um, dda->endpoint.F, distance),
+							dda->fast_spm);
+
+			if (dda->rampup_steps > dda->total_steps / 2)
+				dda->rampup_steps = dda->total_steps / 2;
+			dda->rampdown_steps = dda->total_steps - dda->rampup_steps;
 			
-			//WRITE(DEBUG_LED_PIN, 0);
-		}
-		#endif
-	#else
-        dda->n = 0;
-        dda->c = pgm_read_dword(&c0_P[dda->fast_axis]);
-      #endif
-		
-		if(dda->id == 14) queue_dump();
+			// In case lookahead fails (when used), set up a standard ramp coefficient
+			dda->n = 0;
+			dda->c = pgm_read_dword(&c0_P[dda->fast_axis]);
+
+			#ifdef LOOKAHEAD
+				dda->distance = distance;
+				//sersendf_P(PSTR("normal join\r\n"));
+				// Find the maximum crossing speed between this move and the previous one.
+				// Note: only needed once as we can re-use the result every time we walk over the movement queue.
+				dda_find_crossing_speed(prev_dda, dda);
+				
+				#if !defined(LOOKAHEAD_LEVEL) || LOOKAHEAD_LEVEL == 0
+					// Original lokahead behavior: only join consecutive moves upon their creation
+					dda_join_moves(prev_dda, dda, (pgm_read_dword(&c0_P[dda->fast_axis])) );
+
+					// Obsolete: this is now done inside 'dda_join_moves' as its needed for multipass lookahead
+					//dda->n = dda->start_steps;
+					//if (dda->n == 0)
+					//	dda->c = pgm_read_dword(&c0_P[dda->fast_axis]);
+					//else
+					//	dda->c = (pgm_read_dword(&c0_P[dda->fast_axis]) *
+					//			int_inv_sqrt(dda->n)) >> 13;
+					//if (dda->c < dda->c_min)
+					//	dda->c = dda->c_min;
+				#else
+					#if !defined(LOOKAHEAD_PREFILL)
+					#error LOOKAHEAD_PREFILL not defined
+					#endif
+					#if LOOKAHEAD_PREFILL >= MOVEBUFFER_SIZE
+					#error LOOKAHEAD_PREFILL has to be smaller than MOVEBUFFER_SIZE otherwise multi-pass lookahead will not work
+					#endif
+					// Multiple pass lookahead (when the queue has enough moves to be delayed by this)
+					uint8_t moves = queue_length();
+					if(moves <= LOOKAHEAD_PREFILL) {
+						// Not enough moves queued: only combine the previous and this new move
+						//dda_join_moves(prev_dda, dda, (pgm_read_dword(&c0_P[dda->fast_axis])) );
+					} else {
+						//WRITE(DEBUG_LED_PIN, 1);
+						// Incremental look-ahead: as long as the movement queue stays full, keep optimizing
+						// the queue (up to a certain point).
+						uint8_t max_iter = LOOKAHEAD_LEVEL;	// Limit the number of iterations spent optimizing the movement queue
+						// Apply default settings in case lookahead is not fast enough:
+						dda->n = 0;
+						dda->c = pgm_read_dword(&c0_P[dda->fast_axis]);
+							
+						while(moves > LOOKAHEAD_PREFILL && max_iter && queue_length() > LOOKAHEAD_PREFILL) {
+							//sersendf_P(PSTR("tree-walker(%d): %d moves\r\n"), max_iter, moves);
+							DDA *move_p = queue_get_start()->next_move; 	// Skip move 0: that one is always active
+							DDA *next_p = NULL;
+
+							// Loop over 'moves' moves to stitch them together
+							//sersendf_P(PSTR("walk\r\n"));
+							while(moves > 0) {
+								//sersendf_P(PSTR("turbo %d\r\n"), moves);
+								//sersendf_P(PSTR("m 0x%u, m->n 0x%u\r\n"), move_p, move_p->next_move);
+								next_p = move_p->next_move;
+								if(next_p->optimal == 0)
+									dda_join_moves(move_p, next_p, (pgm_read_dword(&c0_P[next_p->fast_axis])) );	// Note: adjusting 'c' and 'n' is done in here
+
+								move_p = next_p;
+								moves--;
+							}
+
+							// After this run, check the length of the queue again
+							moves = queue_length();
+							max_iter--;
+						}
+						//WRITE(DEBUG_LED_PIN, 0);
+					}
+				#endif
+			#endif
+				
+			#ifdef LOOKAHEAD
+				//if(dda->id == 14) queue_dump();	// TODO: Remove this when lookahead is working
+			#endif
 
 		#elif defined ACCELERATION_TEMPORAL
 			// TODO: calculate acceleration/deceleration for each axis
-      for (i = X; i < AXIS_COUNT; i++) {
-        dda->step_interval[i] = 0xFFFFFFFF;
-        if (dda->delta[i])
-          dda->step_interval[i] = move_duration / dda->delta[i];
-      }
+			for (i = X; i < AXIS_COUNT; i++) {
+				dda->step_interval[i] = 0xFFFFFFFF;
+				if (dda->delta[i])
+					dda->step_interval[i] = move_duration / dda->delta[i];
+			}
 
-      dda->c = 0xFFFFFFFF;
-      dda->axis_to_step = X; // Safety value
-      for (i = X; i < AXIS_COUNT; i++) {
-        if (dda->step_interval[i] < dda->c) {
-          dda->axis_to_step = i;
-          dda->c = dda->step_interval[i];
-        }
-      }
+			dda->c = 0xFFFFFFFF;
+			dda->axis_to_step = X; // Safety value
+			for (i = X; i < AXIS_COUNT; i++) {
+				if (dda->step_interval[i] < dda->c) {
+					dda->axis_to_step = i;
+					dda->c = dda->step_interval[i];
+				}
+			}
 
 		#else
-      dda->c = move_duration / target->F;
-      if (dda->c < c_limit)
-        dda->c = c_limit;
+			dda->c = move_duration / target->F;
+			if (dda->c < c_limit)
+				dda->c = c_limit;
 		#endif
 	} /* ! dda->total_steps == 0 */
 
@@ -492,9 +495,9 @@ void dda_create(DDA *dda, TARGET *target) {
 
 	// next dda starts where we finish
 	memcpy(&startpoint, target, sizeof(TARGET));
-  #ifdef LOOKAHEAD
-    prev_dda = dda;
-  #endif
+	#ifdef LOOKAHEAD
+		prev_dda = dda;
+	#endif
 }
 
 /*! Start a prepared DDA

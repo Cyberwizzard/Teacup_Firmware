@@ -44,7 +44,7 @@
 #define MIN(a,b)  (((a)<(b))?(a):(b))
 
 void dda_find_crossing_speed(DDA *prev, DDA *current);
-void dda_join_moves(DDA *prev, DDA *current);
+void dda_join_moves(DDA *prev, DDA *current, uint32_t c0);
 
 // Debug counters
 extern uint32_t lookahead_joined;

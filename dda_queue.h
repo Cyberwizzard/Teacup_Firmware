@@ -24,11 +24,18 @@ uint8_t queue_full(void);
 uint8_t queue_empty(void);
 DDA *queue_current_movement(void);
 
-// queue traversal methods for lookahead
+#if defined(LOOKAHEAD) && defined(LOOKAHEAD_LEVEL) && LOOKAHEAD_LEVEL > 0 // queue traversal methods for lookahead
+// get the number of queued moves
 uint8_t queue_length(void);
-DDA* queue_get_move(uint8_t id);
+// get the i^th move from the start of the buffer
+//DDA* queue_get_move(uint8_t i);
+// get the first move in the queue
+DDA *queue_get_start(void);
+// initialise the queue
 void queue_init(void);
-void queue_dump(void);
+// print a dump of all moves in the queue
+//void queue_dump(void);
+#endif
 
 // take one step
 void queue_step(void);

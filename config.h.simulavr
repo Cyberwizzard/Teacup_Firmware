@@ -74,7 +74,7 @@
 #define	STEPS_PER_M_Z					2844444 // 9 -> 20 teeth -> M8
 
 /// http://blog.arcol.hu/?p=157 may help with this one
-#define	STEPS_PER_M_E					320000
+#define	STEPS_PER_M_E					3200000
 
 /*
 	Values depending on the capabilities of your stepper motors and other mechanics.
@@ -202,16 +202,30 @@
 #define LOOKAHEAD
 
 /** \def LOOKAHEAD_LEVEL
-	When LOOKAHEAD is defined, this describes the maximum number of times the *entire*
-	move buffer is optimized with look-ahead when a new move is sent to the printer.
-	When using small move buffers (to safe memory), setting this to a higher setting will
-	force more aggressive optimization as long as the move buffer does not deplete.
+	Only used when LOOKAHEAD is defined.
+	This parameter describes the maximum number of times the *entire* move buffer is optimised
+	with multi-pass look-ahead when *a* new move is sent to the machine.
+	When using small move buffers (to safe memory), setting this to a higher level will
+	force more aggressive optimisation as long as the move buffer does not deplete.
 	WARNING: Setting this too high on configurations with large move buffers might actually
-	cause the look-ahead to become too slow to be useful.
+	cause the look-ahead to become too slow to be useful or even cause the machine to pause between
+	moves (voiding the use in the first place).
 	Suggested settings: move buffer of 8: LOOKAHEAD_LEVEL = 4, move buffer of 16: LOOKAHEAD_LEVEL = 1
-	Set to 0 to only join consecutive moves (and never try to optimize moves more than once, aka old behavior)
+	Set to 0 (or comment out) to only join consecutive moves (and never try to optimize moves more than
+	once, aka original look-ahead behavior)
 */
-#define LOOKAHEAD_LEVEL 5
+#define LOOKAHEAD_LEVEL 2
+
+/** \def LOOKAHEAD_PREFILL
+	Only used for multi-pass look-ahead (LOOKAHEAD defined and LOOKAHEAD_LEVEL > 0).
+	Because multi-pass look-ahead attempts to optimise all queued movement when sending a new move 
+	to the machine, it needs to pre-fill the queue with a couple of moves to prevent the case where
+	a new move is dispatched while the multi-pass look-ahead is still working (resulting in no or 
+	sporadic move joining).
+	Emperically found to be a fine default 4 for MOVEBUFFER_SIZE 8 to 16; when using larger move buffers,
+	lower LOOKAHEAD_LEVEL or raise this value to make sure look-ahead can finish before the queue depletes.
+*/
+#define LOOKAHEAD_PREFILL 4
 
 /** \def MAX_JERK_X
     \def MAX_JERK_Y
@@ -239,10 +253,10 @@
   Sane values: 0 to 400
   Valid range: 0 to 65535
 */
-#define MAX_JERK_X 20
-#define MAX_JERK_Y 20
+#define MAX_JERK_X 200
+#define MAX_JERK_Y 200
 #define MAX_JERK_Z 0
-#define MAX_JERK_E 20
+#define MAX_JERK_E 200
 
 
 /***************************************************************************\
@@ -531,7 +545,7 @@ PWM value for 'off'
 		note that each move takes a fair chunk of ram (69 bytes as of this writing) so don't make the buffer too big - a bigger serial readbuffer may help more than increasing this unless your gcodes are more than 70 characters long on average.
 		however, a larger movebuffer will probably help with lots of short consecutive moves, as each move takes a bunch of math (hence time) to set up so a longer buffer allows more of the math to be done during preceding longer moves
 */
-#define	MOVEBUFFER_SIZE 16
+#define	MOVEBUFFER_SIZE 12
 
 /** \def DC_EXTRUDER
 	DC extruder

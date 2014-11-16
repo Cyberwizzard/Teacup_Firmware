@@ -154,8 +154,8 @@ void enqueue_home(TARGET *t, uint8_t endstop_check, uint8_t endstop_stop_cond) {
 /// timer interrupt is disabled).
 void next_move() {
 	while ((queue_empty() == 0) && (movebuffer[mb_tail].live == 0)) {
-		WRITE(DEBUG_LED_PIN, 1);
-#ifdef LOOKAHEAD
+		//WRITE(DEBUG_LED_PIN, 1);
+#if defined(LOOKAHEAD) && defined(LOOKAHEAD_LEVEL) && LOOKAHEAD_LEVEL > 0
 		// when moving to the next move, the current move is complete and as such no longer valid
 		movebuffer[mb_tail].valid = 0;
 #endif
@@ -174,15 +174,19 @@ void next_move() {
 		else {
 			dda_start(current_movebuffer);
 		}
-		WRITE(DEBUG_LED_PIN, 0);
+		//WRITE(DEBUG_LED_PIN, 0);
 	} 
 }
+
+// The following functions only exist for use with multi-pass lookahead
+#if defined(LOOKAHEAD) && defined(LOOKAHEAD_LEVEL) && LOOKAHEAD_LEVEL > 0
 
 /**
  * Berend: determine how many moves are queued (used in lookahead)
  */
 uint8_t queue_length() {
 	uint8_t len = 0;
+	ATOMIC_START
 	if(mb_tail < mb_head) {
 		len = mb_head - mb_tail;
 	} else if(mb_tail == mb_head) {
@@ -190,6 +194,7 @@ uint8_t queue_length() {
 	} else {
 		len = MOVEBUFFER_SIZE - mb_tail + mb_head;
 	}
+	ATOMIC_END
 	
 	//sersendf_P(PSTR("tail: %d - head: %d - tail live: %d - len: %d\r\n"), mb_tail, mb_head, movebuffer[mb_tail].live, len);
 	
@@ -200,23 +205,24 @@ uint8_t queue_length() {
 /**
  * Berend: get a specific move from the queue
  */
-DDA* queue_get_move(uint8_t id) {
-	//if(queue_empty() != 0) return NULL;
-	//if(id >= queue_length()) return NULL;
-	
-	if(mb_tail + id > MOVEBUFFER_SIZE)
-		id = mb_tail + id - MOVEBUFFER_SIZE;
-	else
-		id = mb_tail + id;
-	return &movebuffer[id];
-}
+// DDA* queue_get_move(uint8_t i) {
+// 	//if(queue_empty() != 0) return NULL;
+// 	//if(id >= queue_length()) return NULL;
+// 	
+// 	if(mb_tail + i >= MOVEBUFFER_SIZE)
+// 		i = mb_tail + i - MOVEBUFFER_SIZE;
+// 	else
+// 		i = mb_tail + i;
+// 	return &movebuffer[i];
+// }
 
 /**
  * Initialize the queue; link all DDA objects together for use with lookahead
  */
 void queue_init() {
-#ifdef LOOKAHEAD
-	// Link all moves in the queue together
+	//sersendf_P(PSTR("queue 0x%u - 0x%u\r\n"), &movebuffer[0], &movebuffer[MOVEBUFFER_SIZE-1]);
+	
+	// Transform the queue in a linked list for lookahead
 	DDA *p1 = &movebuffer[0], *p2 = NULL;
 	for (uint8_t i = 1; i < MOVEBUFFER_SIZE; i++) {
 		p2 = &movebuffer[i];
@@ -225,34 +231,43 @@ void queue_init() {
 	}
 	// Link the last move in the queue to the first
 	p1->next_move = &movebuffer[0];
-#endif
 }
 
-void queue_dump() {
-	DDA *m = &movebuffer[0];
-	DDA *s_m = m;
-	uint8_t s_id = m->id, moves = MOVEBUFFER_SIZE;
-	
-	// Find the the move with the lowest ID
-	while(moves-- > 0) {
-		m = m->next_move;
-		if(m->id < s_id) {
-			s_id = m->id;
-			s_m = m;
-		}
-	}
-	
-	moves = MOVEBUFFER_SIZE;
-	m = s_m;
-	sersendf_P(PSTR("buffer len: %d\r\n"), moves);
-	while(moves-- > 0) {
-		sersendf_P(PSTR("%d: SPEEDS entry:%lu,\texit:%lu,\tcrossF:%lu\tLENGTHS len:%lu,\trampup:%lu,\trampdown:%lu\tOPTIMAL:%d\r\n"), 
-			m->id, m->start_steps, m->end_steps, m->crossF, m->total_steps,
-			m->rampup_steps, m->total_steps-m->rampdown_steps, m->optimal
-		);
-		m = m->next_move;
-	}
+/// Get the start of the queue; used for multi-pass lookahead as a starting
+/// point. Warning: the head of the queue is the live move.
+DDA *queue_get_start() {
+	return &movebuffer[mb_tail];
 }
+
+#endif // End of lookahead specific functions
+
+// void queue_dump() {
+// #ifdef LOOKAHEAD
+// 	DDA *m = &movebuffer[0];
+// 	DDA *s_m = m;
+// 	uint8_t s_id = m->id, moves = MOVEBUFFER_SIZE;
+// 	
+// 	// Find the the move with the lowest ID
+// 	while(moves-- > 0) {
+// 		m = m->next_move;
+// 		if(m->id < s_id) {
+// 			s_id = m->id;
+// 			s_m = m;
+// 		}
+// 	}
+// 	
+// 	moves = MOVEBUFFER_SIZE;
+// 	m = s_m;
+// 	sersendf_P(PSTR("buffer len: %d\r\n"), moves);
+// 	while(moves-- > 0) {
+// 		sersendf_P(PSTR("%d: SPEEDS entry:%lu,\texit:%lu,\tcrossF:%lu\tLENGTHS len:%lu,\trampup:%lu,\trampdown:%lu\tOPTIMAL:%d\tc:%lu n:%ld\r\n"), 
+// 			m->id, m->start_steps, m->end_steps, m->crossF, m->total_steps,
+// 			m->rampup_steps, m->total_steps-m->rampdown_steps, m->optimal, m->c, m->n
+// 		);
+// 		m = m->next_move;
+// 	}
+// #endif
+// }
 
 /// DEBUG - print queue.
 /// Qt/hs format, t is tail, h is head, s is F/full, E/empty or neither

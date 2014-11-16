@@ -1,48 +1,82 @@
 [*]
 [*] GTKWave Analyzer v3.3.62 (w)1999-2014 BSI
-[*] Tue Nov 11 19:56:14 2014
+[*] Sat Nov 15 20:56:00 2014
 [*]
-[dumpfile] "/home/cyberwizzard/tmp2/Teacup_Firmware/testcases/short-moves-clean.processed.vcd"
-[dumpfile_mtime] "Tue Nov 11 19:52:21 2014"
-[dumpfile_size] 106891
+[dumpfile] "/home/cyberwizzard/tmp3/Teacup_Firmware/testcases/simulation.processed.vcd"
+[dumpfile_mtime] "Sat Nov 15 20:48:12 2014"
+[dumpfile_size] 2384594
 [savefile] "/home/cyberwizzard/tmp2/Teacup_Firmware/testcases/save-file-velocities.gtkw"
-[timestart] 866200000
-[size] 1920 1007
-[pos] -1 -4
-*-27.270847 1604077268 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1
-[sst_width] 235
+[timestart] 17200000
+[size] 1920 1027
+[pos] -1 -424
+*-26.980497 902155118 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1
+[sst_width] 246
 [signals_width] 320
 [sst_expanded] 1
-[sst_vpaned_height] 156
+[sst_vpaned_height] 313
+@28
+Timings.Debug_LED
+Steppers.X_step
 @88024
-Steppers.X_steps/s[15:0]
+Steppers.X_steps/s[19:0]
 @20000
 -
 -
--
 @24
-Steppers.X_pos_steps[15:0]
-Steppers.X_pos_um[15:0]
-@8025
-Steppers.X_pos_um[15:0]
+Steppers.X_pos_steps[19:0]
+@88024
+Steppers.X_pos_um[19:0]
 @20000
 -
 -
--
--
 @24
-Steppers.X_mm/min[15:0]
+Steppers.X_mm/min[19:0]
 @200
 -
+@28
+Steppers.Y_step
 @88022
-Steppers.Y_steps/s[15:0]
+Steppers.Y_steps/s[19:0]
 @20000
 -
 -
+@88024
+Steppers.Y_pos_steps[19:0]
+@20000
+-
 -
 @24
-Steppers.Y_pos_steps[15:0]
-Steppers.Y_pos_um[15:0]
-Steppers.Y_mm/min[15:0]
+Steppers.Y_pos_um[19:0]
+Steppers.Y_mm/min[19:0]
+@28
+Steppers.Z_step
+@88024
+Steppers.Z_steps/s[19:0]
+@20000
+-
+-
+@80024
+Steppers.Z_pos_steps[19:0]
+@88024
+Steppers.Z_pos_um[19:0]
+@20000
+-
+-
+@28
+Steppers.E_step
+@88024
+Steppers.E_steps/s[19:0]
+@20000
+-
+-
+@24
+Steppers.E_pos_steps[19:0]
+@88024
+Steppers.E_pos_um[19:0]
+@20000
+-
+-
+@25
+Steppers.E_mm/min[19:0]
 [pattern_trace] 1
 [pattern_trace] 0

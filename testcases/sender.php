@@ -68,6 +68,22 @@ if($fo===false) {
 
 echo "Sender ready, starting now...\n";
 
+// Use stream_select to flush anything still in the fifo
+// as it will confuse the sender (for example the simulavr
+// startup blurp)
+$null = NULL;
+$rs = array($fi);
+while(($s = stream_select($rs, $null, $null, 1)) !== false && $s > 0) {
+	// There is data, read until the simulator is waiting for input
+	$r = fgets($fi);
+	if($r !== false) {
+		$r = trim($r);
+		wlog("< $r");
+	}
+}
+echo "Flush complete, starting gcode script\n";
+
+// Now start sending commands
 while(($line = fgets($gc))!==false) {
 	// Filter lines
 	$arr = explode(';', $line);
@@ -96,6 +112,12 @@ while(($line = fgets($gc))!==false) {
 				// Kill the simulator
 				wlog("Received stop, killing simulator");
 				exec("kill -INT $(pidof -x \"$SIMULAVR\")");
+				exit(0);
+			}
+			// Parse response: a timeout is a reason to stop
+			if(strpos($r, "Ran too long") !== false) {
+				wlog("Simulator ended");
+				exit(0);
 			}
 			// Parse response: an 'ok' at the start of a line means
 			// the command was accepted and we can send another
@@ -104,5 +126,32 @@ while(($line = fgets($gc))!==false) {
 		}
 	}
 }
+
+sleep(1);
+
+// Use stream_select to flush anything still in the fifo
+// as it will confuse the sender (for example the simulavr
+// startup blurp)
+$null = NULL;
+$rs = array($fi);
+while(($s = stream_select($rs, $null, $null, 1)) !== false && $s > 0) {
+	// There is data, read until the simulator is waiting for input
+	$r = fgets($fi);
+	if($r !== false) {
+		$r = trim($r);
+		wlog("<< $r");
+		
+		// Parse response: an M2 signals the end of the script and
+		// will cause the firmware to reply with 'stop'
+		if(substr($r,0,4)=="stop") {
+			// Kill the simulator
+			wlog("Received stop, killing simulator");
+			exec("kill -INT $(pidof -x \"$SIMULAVR\")");
+			exit(0);
+		}
+	}
+}
+
+// Kill the simulator if its still running
 echo "Done\n";
 

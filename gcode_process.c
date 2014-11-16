@@ -26,6 +26,7 @@
 #include	"clock.h"
 #include	"config_wrapper.h"
 #include	"home.h"
+#include	"dda_lookahead.h"
 
 /// the current tool
 uint8_t tool;
@@ -362,9 +363,11 @@ void process_gcode_command() {
 				queue_wait();
 				for (i = 0; i < NUM_HEATERS; i++)
 					temp_set(i, 0);
-				queue_dump(); 
 				power_off();
-        serial_writestr_P(PSTR("\nstop\n"));
+				sersendf_P(PSTR("look-ahead: level: %d, queue size: %d, prefill: %d, joined: %lu, timeouts: %lu"),
+					LOOKAHEAD_LEVEL, MOVEBUFFER_SIZE, LOOKAHEAD_PREFILL, lookahead_joined, lookahead_timeout
+				);
+				serial_writestr_P(PSTR("\nstop\n"));
 				break;
 
 			case 112:

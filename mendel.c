@@ -224,8 +224,10 @@ void init(void) {
 	// set up dda
 	dda_init();
 	
-	// set up the linked list in the DDA queue
-	queue_init();
+	#if defined(LOOKAHEAD) && defined(LOOKAHEAD_LEVEL) && LOOKAHEAD_LEVEL > 0
+		// set up the linked list in the DDA queue
+		queue_init();
+	#endif
 
 	// start up analog read interrupt loop,
 	// if any of the temp sensors in your config.h use analog interface

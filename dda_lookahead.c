@@ -478,6 +478,7 @@ void dda_join_moves_org(DDA *prev, DDA *current) {
  *
  * \param [in] prev is the DDA structure of the move previous to the current one.
  * \param [in] current is the DDA structure of the move currently created.
+ * \param [in] c0 is the c0 ramp coefficient for the 'current' move, used to update current->c 
  *
  * Premise: the 'current' move is not dispatched in the queue: it should remain
  * constant while this function is running.
@@ -485,7 +486,7 @@ void dda_join_moves_org(DDA *prev, DDA *current) {
  * Note: the planner always makes sure the movement can be stopped within the
  * last move (= 'current'); as a result a lot of small moves will still limit the speed.
  */
-void dda_join_moves(DDA *prev, DDA *current) {
+void dda_join_moves(DDA *prev, DDA *current, uint32_t c0) {
 	// Calculating the look-ahead settings can take a while; before modifying
 	// the previous move, we need to locally store any values and write them
 	// when we are done (and the previous move is not already active).
@@ -507,8 +508,12 @@ void dda_join_moves(DDA *prev, DDA *current) {
 #endif
 
 	// Bail out if there's nothing to join (e.g. G1 F1500) or this corner is already optimal.
-	if ( ! prev || prev->nullmove || current->crossF == 0 || prev->valid == 0 || current->optimal == 1)
-		return;
+	if ( ! prev || prev->nullmove || current->crossF == 0
+		#if defined(LOOKAHEAD_LEVEL) && LOOKAHEAD_LEVEL > 0
+			// multi-pass lookahead: when a move has been completed (valid=0) or its already optimal, stop now.
+			|| prev->valid == 0 || current->optimal == 1
+		#endif
+	) return;
 
 	// Show the proposed crossing speed - this might get adjusted below.
 	if (DEBUG_DDA && (debug_flags & DEBUG_DDA))
@@ -648,30 +653,48 @@ void dda_join_moves(DDA *prev, DDA *current) {
 		serprintf(PSTR("this_rampdown: %lu\r\n"), this_total_steps - this_rampdown);
 		serprintf(PSTR("this_F: %lu\r\n"), this_F_in_steps);*/
 
-		uint8_t timeout = 0;
+		// If we alter the entry speed of the current move, scale the ramp coefficient based
+		// on the number of steps spent accelerating.
+		uint32_t current_c = (this_F_start_in_steps == 0) ? c0 : (c0 * int_inv_sqrt(this_F_start_in_steps)) >> 13;
+		// Sanity check: make sure not to exceed the maximum speed set by c_min
+		if (current_c < current->c_min) current_c = current->c_min;
 
+		// Apply everything we just calculated but disable the interrupts to make sure the moves do not 
+		// change during the copying of the settings (which would be bad).
+		uint8_t timeout = 0;
 		ATOMIC_START
 			// Evaluation: determine how we did...
 			lookahead_joined++;
 
 			// Determine if we are fast enough - if not, just leave the moves
 			// Note: to test if the previous move was already executed and replaced by a new
-			// move, we compare the DDA id. As lookahead is done during moves, we track which moves are valid.
-			if(prev->live == 0 && prev->id == prev_id && current->live == 0 && current->id == this_id && prev->valid && current->valid) {
+			// move, we compare the DDA id. As lookahead is done during moves, we also make sure both are valid.
+			if(prev->live == 0 && prev->id == prev_id && current->live == 0 && current->id == this_id
+				#if defined(LOOKAHEAD_LEVEL) && LOOKAHEAD_LEVEL > 0
+					// multi-pass lookahead only: if this move has been completed already (valid=0), do not apply anything
+					&& prev->valid && current->valid
+				#endif
+			) {
 				prev->end_steps = prev_F_end_in_steps;
 				prev->rampup_steps = prev_rampup;
 				prev->rampdown_steps = prev_rampdown;
 				current->rampup_steps = this_rampup;
 				current->rampdown_steps = this_rampdown;
-				//current->end_steps = 0; //current_F_end_in_steps;  // todo: useless to assign as exit speed should not be changed in this iteration
 				current->start_steps = this_F_start_in_steps;
 				la_cnt++;
 				
-				// When we reach the maximum crossing speed, there is nothing left to optimize, next time skip this
-				if(max_crossF_in_steps == crossF_in_steps) {
-					current->optimal = 1;
-					//sersendf_P(PSTR("optimal: %d\r\n"), current->id);
-				}
+				// Set up the variables for the ramping algorithm
+				current->n = this_F_start_in_steps;
+				current->c = current_c;
+
+				#if defined(LOOKAHEAD_LEVEL) && LOOKAHEAD_LEVEL > 0
+					// multi-pass lookahead: when we reach the maximum crossing speed, there is nothing left to optimise for 
+					// any future calls to this function
+					if(max_crossF_in_steps == crossF_in_steps) {
+						current->optimal = 1;
+						//sersendf_P(PSTR("optimal: %d\r\n"), current->id);
+					}
+				#endif
 			} else
 				timeout = 1;
 		ATOMIC_END
@@ -683,7 +706,7 @@ void dda_join_moves(DDA *prev, DDA *current) {
 
 		// If we were not fast enough, any feedback will happen outside the atomic block:
 		if(timeout) {
-			sersendf_P(PSTR("Error: look ahead not fast enough\r\n"));
+			//sersendf_P(PSTR("\r\nerr: lookahead not fast enough\r\n"));
 			lookahead_timeout++;
 		}
 	}
